@@ -129,8 +129,8 @@ def cmd_machine(args, m):
 
 def cmd_sensors(args, m):
     names = args.source or None
-    if names is None and not args.debugfs:
-        names = [n for n in sources.SOURCES if n != "debugfs"] + ["audio"]
+    if names is None:
+        names = [n for n in sources.SOURCES if (n != "debugfs" or args.debugfs) and (n != "api" or not args.no_api)] + ["audio"]
     rs = filtered(all_readings(args, names), args)
     emit_readings(args, rs)
 
@@ -147,7 +147,9 @@ def find(args, key):
         raw = sysfs.read(key)
         return {"id": key, "cat": "path", "dev": None, "attr": os.path.basename(key), "label": None,
                 "value": raw, "unit": None, "raw": raw, "path": key, "writable": sysfs.writable(key)}
-    rs = all_readings(args)
+    names = [n for n in list(sources.SOURCES) + ["audio"]
+             if n != "api" or key.startswith("vulkan.") or key.startswith("gl.")]
+    rs = all_readings(args, names)
     for r in rs:
         if r["id"] == key:
             return r
@@ -187,6 +189,8 @@ def report(args, res):
     log.event("result", result=res)
     if not args.json:
         print(json.dumps(res, indent=1, default=str))
+    elif args.cmd in DOCUMENT_COMMANDS:
+        print(json.dumps(res, default=str))
 
 
 def cmd_set(args, m):
@@ -309,6 +313,8 @@ def cmd_journal(args, m):
 
 
 def cmd_restore(args, m):
+    if args.from_log:
+        return cmd_restore_from_log(args, m)
     if args.kind == ["fan"] or (args.kind and "fan" in args.kind):
         restored, failed = fans.auto(reason=args.reason)
         if args.kind != ["fan"]:
@@ -323,7 +329,202 @@ def cmd_restore(args, m):
     return 1 if failed else 0
 
 
+def cmd_log(args, m):
+    """Print (or follow) the JSON-lines log, optionally filtered."""
+    path = args.log or log.log_path()
+    events = set(args.event or [])
+
+    def keep(rec):
+        return ((not args.session or rec.get("session") == args.session)
+                and (not events or rec.get("event") in events))
+
+    def show(line):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            return
+        if not keep(rec):
+            return
+        if args.json:
+            sys.stdout.write(line if line.endswith("\n") else line + "\n")
+        else:
+            rest = {k: v for k, v in rec.items() if k not in ("ts", "mono", "host", "pid", "session", "event")}
+            print("%s %s %-10s %s" % (rec.get("ts"), rec.get("session"), rec.get("event"),
+                                      json.dumps(rest, default=str)[:300]))
+
+    try:
+        f = open(path)
+    except OSError as e:
+        raise control.Refused("cannot open log %s: %s" % (path, e))
+    with f:
+        lines = f.readlines()
+        for line in (lines[-args.lines:] if args.lines else lines):
+            show(line)
+        sys.stdout.flush()
+        while args.follow:
+            line = f.readline()
+            if line:
+                show(line)
+                sys.stdout.flush()
+            else:
+                time.sleep(0.5)
+
+
+def changes_from_log(path, session=None):
+    """The 'set' events in the log (oldest first), for restore --from-log."""
+    out = []
+    try:
+        with open(path) as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("event") != "set":
+                    continue
+                if session and rec.get("session") != session:
+                    continue
+                out.append(rec)
+    except OSError as e:
+        raise control.Refused("cannot read log %s: %s" % (path, e))
+    return out
+
+
+def cmd_restore_from_log(args, m):
+    """Write back the first original value of every path a logged session
+    changed, newest change first. Used when the journal in /run is gone
+    (another boot keeps nothing to restore, so this is for the same boot)."""
+    changes = changes_from_log(args.log or log.log_path(), args.session)
+    if not changes:
+        raise control.Refused("no 'set' events%s in the log" % (" for session %s" % args.session if args.session else ""))
+    first = {}
+    for rec in changes:
+        first.setdefault(rec["path"], rec)
+    done, failed = [], []
+    for path, rec in reversed(list(first.items())):
+        kind = rec.get("kind", "sysfs")
+        try:
+            if kind in ("sysfs", "fan"):
+                res = control.apply_sysfs(path, rec["original"], m, args.allow_unknown, args.dry_run)
+            elif kind == "alsa":
+                _, card, numid = path.split(":")
+                res = control.apply_alsa(card, numid, rec.get("control", ""), rec["original"], m, args.allow_unknown, args.dry_run)
+            else:
+                raise control.Refused("kind %s is restored from the journal only" % kind)
+            done.append(res)
+        except (control.Refused, OSError) as e:
+            failed.append({"path": path, "error": str(e)})
+    report(args, {"restored": done, "failed": failed, "from_log": True})
+    return 1 if failed else 0
+
+
+def cmd_report(args, m):
+    from . import report as rp
+    rep = rp.build(m, summary)
+    paths = rp.write(rep, args.output) if args.output else None
+    log.event("report", files=paths, elapsed_s=rep["elapsed_s"])
+    if args.json:
+        print(json.dumps(rep, default=str))
+    else:
+        sys.stdout.write(rp.text(rep))
+        if paths:
+            print("written: %s %s" % paths, file=sys.stderr)
+
+
+def cmd_gpu(args, m):
+    from . import gpu
+    res = {"devices": gpu.gpus(), "readings": {r["id"]: r["value"] for r in gpu.readings()},
+           "processes": gpu.per_process(), "mesa": gpu.mesa()}
+    if not args.no_api:
+        res["vulkan"] = gpu.vulkan()
+        res["gl"] = gpu.gl()
+    report(args, res)
+
+
+def cmd_check(args, m):
+    from . import check
+    res = check.run(m, only=args.only, expect=args.expect, api=not args.no_api, timeout=args.timeout)
+    log.event("check", result=res["result"], counts=res["counts"], baseline=args.expect,
+              failures=[r for r in res["checks"] if r["level"] in ("warn", "fail")])
+    if args.json:
+        print(json.dumps(res, default=str))
+    else:
+        sys.stdout.write(check.render(res, args.quiet, args.verbose))
+    return res["exit"]
+
+
+def cmd_snapshot(args, m):
+    from . import snapshot
+    snap = snapshot.build(m, api=not args.no_api)
+    text = json.dumps(snap, indent=1, default=str)
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(text + "\n")
+        log.event("snapshot", file=args.output, elapsed_s=snap["elapsed_s"], probe_errors=snap["probe_errors"])
+        if not args.json:
+            print("snapshot written to %s (%d subsystems, %d services, %d sensor channels, %.1fs)" % (
+                args.output, len(snap["subsystems"]), len(snap["services"]), len(snap["sensors"]), snap["elapsed_s"]),
+                file=sys.stderr)
+    if args.json or not args.output:
+        print(text)
+
+
+def cmd_diff(args, m):
+    from . import snapshot
+    a, b = snapshot.load(args.old), snapshot.load(args.new)
+    ch = snapshot.diff(a, b)
+    if args.quiet:
+        ch = [c for c in ch if c["severity"] == "regression"]
+    regress = sum(1 for c in ch if c["severity"] == "regression")
+    log.event("diff", old=args.old, new=args.new, regressions=regress, changes=len(ch))
+    if args.json:
+        print(json.dumps({"schema": "aurora-diag/diff", "version": 1, "old": args.old, "new": args.new,
+                          "old_kernel": a["kernel"]["release"], "new_kernel": b["kernel"]["release"],
+                          "regressions": regress, "changes": ch}, default=str))
+    else:
+        print("%s (%s) -> %s (%s)" % (args.old, a["kernel"]["release"], args.new, b["kernel"]["release"]))
+        sys.stdout.write(snapshot.render_diff(ch))
+    return 2 if regress else (1 if ch else 0)
+
+
+def cmd_clocks(args, m):
+    from . import clocks
+    report(args, clocks.all_clocks())
+
+
+def cmd_subsys(args, m):
+    from . import subsystems
+    subs = subsystems.subsystems()
+    if not args.all:
+        subs = [s for s in subs if s["kind"] == "block"]
+    if args.json:
+        for s in subs:
+            log.event("subsystem", **s)
+        return
+    log.event("subsystems", count=len(subs))
+    for s in subs:
+        print("%-5s %-34s %-22s %s" % (s["state"]["level"].upper(), (s.get("title") or s["block"])[:34], s["name"][:22], s["state"]["why"][:110]))
+
+
+def cmd_services(args, m):
+    from . import services
+    report(args, services.all_services())
+
+
 def cmd_tui(args, m):
+    if args.dump:
+        from . import dashboard
+        print(dashboard.dump(m, args.dump))
+        return
+    if not args.curses:
+        try:
+            from . import tui_textual
+        except ImportError as e:
+            if args.snapshot:
+                raise control.Refused("showing a capture needs Textual (python3-textual): %s" % e)
+            print("Textual is not installed (python3-textual / python-textual): using the plain view", file=sys.stderr)
+        else:
+            return tui_textual.run(args, m)
     from . import tui
     tui.run(args, m)
 
@@ -348,9 +549,11 @@ def parser():
         sp.add_argument("--all-params", action="store_true", help="every module's parameters, not just platform ones")
 
     sub.add_parser("machine", help="what this machine is and what the tool can do on it")
-    s = sub.add_parser("sensors", help="every reading the kernel exposes")
-    filt(s)
-    s.add_argument("--debugfs", action="store_true", help="include allowlisted debugfs reports (root)")
+    for name in ("list", "sensors"):
+        s = sub.add_parser(name, help="every reading the kernel and the drivers expose" if name == "list" else "same as list")
+        filt(s)
+        s.add_argument("--debugfs", action="store_true", help="include allowlisted debugfs reports (root)")
+        s.add_argument("--no-api", action="store_true", help="skip Vulkan and GL (they run vulkaninfo and an EGL probe)")
     s = sub.add_parser("summary", help="the headline numbers")
     filt(s)
     s = sub.add_parser("get", help="one reading by id or path")
@@ -375,7 +578,7 @@ def parser():
     x.add_argument("--hold", action="store_true")
     x = fs.add_parser("auto")
     x.add_argument("--reason", default="fan auto")
-    x = sub.add_parser("fan-guard", help=argparse.SUPPRESS)
+    x = sub.add_parser("fan-guard")
     x.add_argument("--max-temp", type=float, default=fans.DEFAULT_MAX_TEMP)
 
     h = sub.add_parser("haptic", help="trackpad click strength (live, restorable)")
@@ -411,25 +614,82 @@ def parser():
     x.add_argument("--session")
     x.add_argument("--kind", action="append", help="sysfs fan alsa hid mutter")
     x.add_argument("--reason", default="restore")
-    sub.add_parser("tui", help="interactive view for humans")
+    x.add_argument("--from-log", action="store_true", help="restore the original values of the 'set' events in the log (use --session to pick one)")
+    x = sub.add_parser("log", help="print or follow the JSON-lines log")
+    x.add_argument("-n", "--lines", type=int, default=50, help="last N lines (0 = all)")
+    x.add_argument("-f", "--follow", action="store_true")
+    x.add_argument("--session")
+    x.add_argument("--event", action="append", help="only this event (repeatable): set refuse restored sample ...")
+    x = sub.add_parser("report", help="one bug report: machine, kernel, firmware, GPU, Mesa, Vulkan, GL, sensors")
+    x.add_argument("-o", "--output", help="also write the JSON and text report into this directory")
+    x = sub.add_parser("gpu", help="GPU: DRM devices, driver stats, clients, Mesa, Vulkan, GL")
+    x.add_argument("--no-api", action="store_true", help="skip Vulkan and GL")
+    x = sub.add_parser("check", help="pass/warn/fail per subsystem, service and probe; exit 0/1/2")
+    x.add_argument("--only", help="comma list of groups or names (subsys,service,kernel,sensors,gpu,sep,dcp,...)")
+    x.add_argument("--expect", help="baseline snapshot from a known-good boot: anything it had that is missing now fails")
+    x.add_argument("--quiet", "-q", action="store_true", help="print only warnings and failures")
+    x.add_argument("--verbose", "-v", action="store_true", help="list every row, infrastructure and skipped ones too")
+    x.add_argument("--no-api", action="store_true", help="skip the Vulkan and GL probes")
+    x.add_argument("--timeout", type=float, default=8.0, help="deadline per probe in seconds (default 8)")
+    x = sub.add_parser("snapshot", help="save the machine's state for diff / check --expect")
+    x.add_argument("-o", "--output", help="file to write (default: stdout)")
+    x.add_argument("--no-api", action="store_true", help="skip Vulkan and GL")
+    x = sub.add_parser("diff", help="what changed between two snapshots (exit 2 on regressions)")
+    x.add_argument("old")
+    x.add_argument("new")
+    x.add_argument("--quiet", "-q", action="store_true", help="only regressions")
+    sub.add_parser("clocks", help="CPU policies, DT DVFS ladders, devfreq, memory")
+    x = sub.add_parser("subsys", help="every hardware block: DT, driver, firmware, devices, last error")
+    x.add_argument("--all", action="store_true", help="include infrastructure nodes (DARTs, mailboxes, ...)")
+    sub.add_parser("services", help="userspace services, Touch ID state, speaker protection")
+    x = sub.add_parser("tui", help="interactive dashboard for humans")
+    x.add_argument("--snapshot", help="show a saved `list --json` capture instead of this machine (read only)")
+    x.add_argument("--curses", action="store_true", help="the plain curses view even when Textual is installed")
+    x.add_argument("--dump", metavar="FILE", help="write a capture of everything the dashboard shows (10 s of samples) and exit")
     sub.add_parser("log-path", help="where the log goes")
     return p
 
 
 COMMANDS = {
-    "machine": cmd_machine, "sensors": cmd_sensors, "summary": cmd_summary, "get": cmd_get,
+    "machine": cmd_machine, "sensors": cmd_sensors, "list": cmd_sensors, "log": cmd_log,
+    "report": cmd_report, "gpu": cmd_gpu, "check": cmd_check, "snapshot": cmd_snapshot,
+    "diff": cmd_diff, "clocks": cmd_clocks, "subsys": cmd_subsys, "services": cmd_services, "summary": cmd_summary, "get": cmd_get,
     "set": cmd_set, "watch": cmd_watch, "fan": cmd_fan, "fan-guard": cmd_fan_guard,
     "haptic": cmd_haptic, "display": cmd_display, "kbd": cmd_kbd, "audio": cmd_audio,
     "journal": cmd_journal, "restore": cmd_restore, "tui": cmd_tui, "log-path": cmd_log_path,
 }
 
 
+DOCUMENT_COMMANDS = ("check", "snapshot", "diff", "report", "gpu", "clocks", "services")
+GLOBAL_FLAGS = ("--json", "--allow-unknown", "--dry-run")
+
+
+def hoist_globals(argv):
+    """Let the global options appear after the subcommand too
+    (`aurora-diag list --json`)."""
+    front, rest = [], []
+    it = iter(argv)
+    for a in it:
+        if a in GLOBAL_FLAGS:
+            front.append(a)
+        elif a == "--log":
+            front += [a, next(it, "")]
+        elif a.startswith("--log="):
+            front.append(a)
+        else:
+            rest.append(a)
+    return front + rest
+
+
 def main(argv=None):
-    args = parser().parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser().parse_args(hoist_globals(argv))
     if not args.cmd:
         args.cmd = "summary"
         args.cat = args.source = args.grep = None
-    log.setup(stdout_json=args.json, path=args.log)
+    # Commands that print one JSON document keep stdout for that document;
+    # their events still go to the log file.
+    log.setup(stdout_json=args.json and args.cmd not in DOCUMENT_COMMANDS, path=args.log)
     m = Machine()
     log.event("start", version=__version__, cmd=args.cmd, argv=sys.argv[1:], board=m.board, euid=os.geteuid())
     try:
@@ -445,4 +705,9 @@ def main(argv=None):
         return 2
     except BrokenPipeError:
         return 0
+    except (ValueError, OSError) as e:
+        if args.cmd in ("diff", "check"):
+            print("aurora-diag: %s" % e, file=sys.stderr)
+            return 2
+        raise
     return rc or 0

@@ -18,7 +18,7 @@ Every line has these fields.
 | event | extra fields | when |
 | --- | --- | --- |
 | start | version, cmd, argv, board, euid | every invocation |
-| machine | compatible, model, board, soc, chip, known, exclusions, haptics, fans, root | `machine` |
+| machine | compatible, model, board, soc, apple, firmware, haptics, fans, root | `machine` |
 | reading | id, cat, value, unit, label, path, writable | `sensors`, `get`, `audio` (one per value) |
 | summary | the headline numbers | `summary` |
 | sample | full, values (id to value) | `watch`. Every value once a minute, changed values otherwise |
@@ -40,3 +40,13 @@ Every line has these fields.
 | error | cmd, error | the command failed |
 
 `kind` is one of `sysfs`, `fan`, `alsa`, `hid` or `mutter`.
+
+## Bring-up events
+
+| event | extra fields | when |
+| --- | --- | --- |
+| check | result, counts, baseline, failures | `check` |
+| snapshot | file, elapsed_s, probe_errors | `snapshot -o` |
+| diff | old, new, regressions, changes | `diff` |
+| report | files, elapsed_s | `report` |
+| subsystem / subsystems | the subsystem record / count | `subsys` |

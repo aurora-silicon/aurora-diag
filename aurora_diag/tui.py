@@ -17,15 +17,16 @@ PAGES = [
     ("Overview", None),
     ("Thermal", {"temp", "thermal", "cooling", "fan"}),
     ("Power", {"power", "battery", "regulator"}),
-    ("CPU/GPU", {"cpufreq", "devfreq", "debugfs"}),
+    ("CPU", {"cpufreq", "devfreq", "debugfs"}),
+    ("GPU", {"gpu", "vulkan", "gl"}),
     ("Display", {"display", "backlight", "leds"}),
-    ("Input", {"input"}),
+    ("Input", {"input", "haptic"}),
     ("Audio", {"speaker", "audio"}),
     ("Devices", {"typec", "usb", "radio", "net", "bt", "v4l2", "driver", "coproc", "sep", "iio"}),
     ("Params", {"modparam"}),
     ("Changes", "journal"),
 ]
-SLOW = ("typec", "usb", "input", "radio", "v4l2", "regulator", "remoteproc", "driver", "modparam", "sep", "drm", "debugfs")
+SLOW = ("haptic", "typec", "usb", "input", "radio", "v4l2", "regulator", "remoteproc", "driver", "modparam", "sep", "drm", "debugfs")
 
 
 class State:
@@ -34,6 +35,7 @@ class State:
         self.page, self.sel, self.top = 0, 0, 0
         self.filter = ""
         self.fast, self.slow = [], []
+        self.api = None  # Vulkan and GL: run once, the first time the GPU page shows
         self.slow_at = 0
         self.msg = "q quits (restores), K keeps changes, e edits, / filters, f fan, h haptic, a fans auto"
 
@@ -48,7 +50,9 @@ class State:
 
     def rows(self):
         name, cats = PAGES[self.page]
-        allr = self.fast + self.slow
+        if isinstance(cats, set) and "vulkan" in cats and self.api is None:
+            self.api = sources.collect(["api"])
+        allr = self.fast + self.slow + (self.api or [])
         if cats is None:
             return overview_rows(allr, self.m)
         if cats == "journal":
@@ -68,8 +72,8 @@ def overview_rows(rs, m):
     def row(k, v, unit=None):
         out.append({"id": k, "value": v, "unit": unit, "label": "", "writable": False, "path": None})
 
-    row("machine", "%s (%s, %s)" % (m.model, m.board, m.chip or "unknown SoC"))
-    row("control", "enabled" if m.known else "read-only (unknown machine)")
+    row("machine", "%s (%s, %s)" % (m.model, m.board, m.soc or "unknown SoC"))
+    row("control", "enabled" if m.known else "read-only (not an Apple silicon device tree)")
     name, t = fans.hottest()
     if t is not None:
         row("hottest die", "%.1f C  %s" % (t, name))

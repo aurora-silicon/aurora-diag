@@ -53,6 +53,16 @@ def read(path, limit=65536):
     return data.decode("utf-8", "replace").strip()
 
 
+def read_error(path, limit=65536):
+    """(text, None) or (None, 'why'): like read() but says why it failed."""
+    try:
+        with open(root(path), "rb") as f:
+            data = f.read(limit)
+    except OSError as e:
+        return None, e.strerror or str(e)
+    return data.decode("utf-8", "replace").strip(), None
+
+
 def read_timeout(path, timeout=2.0, limit=65536):
     """read() in a worker thread so a blocking file cannot hang the tool."""
     result = [None]
@@ -136,3 +146,22 @@ def uevent(path):
         k, _, v = line.partition("=")
         out[k] = v
     return out
+
+
+def dt_value(path):
+    """A device-tree property as text: a string list joined by spaces when
+    it is printable text, else its big-endian 32-bit cells joined by dots
+    (apple,firmware-version = <26 6 2> reads "26.6.2")."""
+    try:
+        with open(root(path), "rb") as f:
+            data = f.read(4096)
+    except OSError:
+        return None
+    if not data:
+        return ""
+    parts = data.rstrip(b"\0").split(b"\0")
+    if data.endswith(b"\0") and all(p and all(32 <= c < 127 for c in p) for p in parts):
+        return " ".join(p.decode("ascii") for p in parts)
+    if len(data) % 4 == 0:
+        return ".".join(str(int.from_bytes(data[i:i + 4], "big")) for i in range(0, len(data), 4))
+    return data.hex()

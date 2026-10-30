@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Trackpad click strength through the actuator's HID feature reports.
 
-On the MTP machines (M2, M3, M4) and on the SPI trackpads (M1 Pro/Max) the
-actuator firmware plays the click by itself and takes its waveforms from
+Any HID device whose name says "actuator" is treated as a trackpad
+actuator. On the MTP and SPI trackpads measured so far the actuator firmware plays the click by itself and takes its waveforms from
 feature reports 0x22 (press) and 0x23 (release); the third byte of each is
 the strength. The firmware defaults read 0x23 / 0x14 on every machine
 measured; the kernel may set others from the device tree
@@ -63,8 +63,6 @@ def set_report(dev, data):
 
 
 def status(machine):
-    if machine.excluded("haptics"):
-        return {"supported": False, "reason": "haptics are excluded on %s" % machine.board}
     dev, name = find_actuator()
     if not dev:
         return {"supported": False, "reason": "no trackpad actuator HID device"}

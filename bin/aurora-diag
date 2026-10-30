@@ -13,4 +13,11 @@ for cand in (here, os.path.join(here, "share", "aurora-diag")):
 
 from aurora_diag.cli import main  # noqa: E402
 
-sys.exit(main())
+rc = main()
+try:
+    sys.stdout.flush()
+    sys.stderr.flush()
+except BrokenPipeError:
+    pass
+# A probe stuck in a kernel read lives on in a daemon thread: do not wait for it.
+os._exit(rc or 0)

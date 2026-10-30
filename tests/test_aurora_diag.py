@@ -152,7 +152,15 @@ class TestRead(Base):
         build(self.root)
         m = Machine()
         self.assertTrue(m.known)
-        self.assertEqual(m.chip, "M1 Pro")
+        self.assertEqual(m.soc, "apple,t6000")
+        self.assertEqual(m.board, "apple,j316s")
+
+    def test_unknown_machine_is_read_only(self):
+        build(self.root, compat=b"acme,board\0acme,soc\0")
+        m = Machine()
+        self.assertFalse(m.known)
+        with self.assertRaises(control.Refused):
+            control.apply_sysfs("/sys/class/hwmon/hwmon2/fan1_target", "3000", m)
 
 
 class TestPolicy(Base):

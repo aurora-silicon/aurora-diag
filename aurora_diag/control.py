@@ -60,7 +60,7 @@ DENY_PATHS = [
 def refusal(path, machine=None, allow_unknown=False):
     """None if the policy allows writing this path, else the reason."""
     if machine is not None and not machine.known and not allow_unknown:
-        return "unknown machine (%s): read-only unless --allow-unknown" % (machine.board,)
+        return "not an Apple silicon device tree (%s): read-only unless --allow-unknown" % (machine.board,)
     if path.startswith("alsa:"):
         return None  # checked by name in alsa_refusal()
     if not (path.startswith("/sys/")):

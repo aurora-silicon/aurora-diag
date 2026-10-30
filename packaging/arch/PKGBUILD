@@ -1,13 +1,16 @@
 pkgname=aurora-diag
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
-pkgdesc='Bring-up diagnostics for Apple silicon Macs (development only)'
+pkgdesc='Bring-up diagnostics and regression checks for Apple silicon Macs (development only)'
 arch=('any')
 url='https://github.com/aurora-silicon/aurora-diag'
 license=('MIT')
 _commit=@COMMIT@
 depends=('python')
 optdepends=('alsa-utils: ALSA control readout'
+            'python-textual: the dashboard'
+            'vulkan-tools: Vulkan report (vulkaninfo)'
+            'mesa-utils: eglinfo and glxinfo summaries'
             'glib2: Mutter power save through gdbus')
 makedepends=('git' 'make')
 source=("aurora-diag::git+$url.git#commit=$_commit")

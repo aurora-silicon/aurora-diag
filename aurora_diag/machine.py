@@ -1,41 +1,20 @@
 # SPDX-License-Identifier: MIT
-"""Which machine this is, from the device tree's compatible strings.
+"""Which machine this is, from the device tree alone.
 
-Support is decided by the SoC family, never by a list of boxes: any board on
-a known Apple SoC gets the control side, everything else is read-only unless
-the user passes --allow-unknown. Features (fans, haptics, lid angle) are then
-detected from what the kernel exposes, not from the board name.
+There is no table of machines or SoCs here. The board and SoC compatibles,
+the model string and the boot chain versions come straight from the device
+tree; every feature (fans, haptics, lid angle, GPU) is then detected from
+what the kernel exposes. A machine whose device tree does not say
+"apple,arm-platform" is read-only unless the user passes --allow-unknown.
 """
+
+import re
 
 from . import sysfs
 
-# Apple SoC compatibles whose kernel interfaces this tool knows.
-KNOWN_SOCS = {
-    "apple,t8103": "M1",
-    "apple,t6000": "M1 Pro",
-    "apple,t6001": "M1 Max",
-    "apple,t6002": "M1 Ultra",
-    "apple,t8112": "M2",
-    "apple,t6020": "M2 Pro",
-    "apple,t6021": "M2 Max",
-    "apple,t6022": "M2 Ultra",
-    "apple,t8122": "M3",
-    "apple,t6030": "M3 Pro",
-    "apple,t6031": "M3 Max",
-    "apple,t6034": "M3 Max",
-    "apple,t8132": "M4",
-    "apple,t6040": "M4 Pro",
-    "apple,t6041": "M4 Max",
-    "apple,t8140": "A18 Pro",
-}
-
-# Features a board must not get even when its hardware looks like it has
-# them. Keyed by board compatible. Kept short on purpose: everything else is
-# detected.
-FEATURE_EXCLUSIONS = {
-    # MacBook Neo: the trackpad actuator path is out of scope for this tool.
-    "apple,j700": {"haptics"},
-}
+CHOSEN = "/proc/device-tree/chosen"
+# Boot chain and firmware versions the loaders publish in /chosen.
+CHOSEN_VERSIONS = re.compile(r"^(asahi,.*version|u-boot,version|aurora,.*version)$")
 
 
 class Machine:
@@ -43,19 +22,22 @@ class Machine:
         self.compatible = sysfs.dt_strings("/proc/device-tree/compatible")
         self.model = (sysfs.read("/proc/device-tree/model") or "").rstrip("\0")
         self.board = self.compatible[0] if self.compatible else None
-        self.soc = next((c for c in self.compatible if c in KNOWN_SOCS), None)
         self.apple = "apple,arm-platform" in self.compatible
-
-    @property
-    def chip(self):
-        return KNOWN_SOCS.get(self.soc)
+        # The SoC is the last vendor compatible before the platform string.
+        socs = [c for c in self.compatible[1:] if c != "apple,arm-platform"]
+        self.soc = socs[-1] if socs else None
 
     @property
     def known(self):
-        return self.apple and self.soc is not None
+        """Changes are allowed on any Apple silicon device tree."""
+        return self.apple
 
-    def excluded(self, feature):
-        return feature in FEATURE_EXCLUSIONS.get(self.board, set())
+    def firmware(self):
+        out = {}
+        for p in sysfs.listdir(CHOSEN):
+            if CHOSEN_VERSIONS.match(p):
+                out[p] = sysfs.dt_value(CHOSEN + "/" + p)
+        return out
 
     def as_dict(self):
         return {
@@ -63,7 +45,6 @@ class Machine:
             "model": self.model,
             "board": self.board,
             "soc": self.soc,
-            "chip": self.chip,
-            "known": self.known,
-            "exclusions": sorted(FEATURE_EXCLUSIONS.get(self.board, set())),
+            "apple": self.apple,
+            "firmware": self.firmware(),
         }

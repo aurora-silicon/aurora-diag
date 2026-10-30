@@ -97,6 +97,10 @@ def _num(text):
 
 
 def _reading(cat, id_, dev, attr, path, raw, value=None, unit=None, label=None):
+    if raw is None and value is None and path and not path.startswith("alsa:"):
+        _, why = sysfs.read_error(path)
+        if why:
+            value = "unreadable (%s)" % why
     return {
         "id": id_, "cat": cat, "dev": dev, "attr": attr, "label": label,
         "value": (raw if raw is not None else "unreadable") if value is None else value,
@@ -563,22 +567,81 @@ def debugfs():
     return out
 
 
+def haptic():
+    """The trackpad actuator's click strength (root: it reads the hidraw
+    node's feature reports; nothing is written)."""
+    from . import haptics
+    dev, name = haptics.find_actuator()
+    if not dev:
+        return []
+    out = []
+    for rid, attr in ((haptics.PRESS, "press"), (haptics.RELEASE, "release")):
+        try:
+            rep = haptics.get_report(dev, rid)
+            raw = rep.hex()
+            value = rep[haptics.STRENGTH_BYTE]
+        except OSError as e:
+            raw, value = None, "unreadable (%s)" % e.strerror
+        r = _reading("haptic", "haptic.%s.%s" % (os.path.basename(dev), attr), name, attr, dev, raw,
+                     value, None, "report %#x strength byte; `aurora-diag haptic set`" % rid)
+        r["writable"] = False  # changed through `haptic set`, which journals the whole report
+        out.append(r)
+    return out
+
+
+def _gpu():
+    from . import gpu
+    return gpu.readings()
+
+
+def _gpu_live():
+    from . import gpu
+    return gpu.readings(live_only=True)
+
+
+def _clock():
+    from . import clocks
+    return clocks.readings()
+
+
+def _subsys():
+    from . import subsystems
+    return subsystems.readings()
+
+
+def _service():
+    from . import services
+    return services.readings()
+
+
+def _api():
+    from . import gpu
+    return gpu.api_readings()
+
+
 SOURCES = {
     "hwmon": hwmon, "iio": iio, "thermal": thermal, "power_supply": power_supply,
     "cpufreq": cpufreq, "devfreq": devfreq, "backlight": backlight, "drm": drm,
     "typec": typec, "usb": usb, "input": input_devices, "radio": radios,
     "v4l2": video, "regulator": regulators, "remoteproc": remoteproc,
-    "driver": drivers, "modparam": modparams, "sep": sep, "debugfs": debugfs,
+    "driver": drivers, "modparam": modparams, "sep": sep, "haptic": haptic,
+    "gpu": _gpu, "clock": _clock, "subsys": _subsys, "service": _service,
+    "api": _api, "debugfs": debugfs,
 }
+# Sources only asked for by name: the GPU without the per-process walk,
+# for watch and the TUI's once-a-second refresh.
+HIDDEN_SOURCES = {"gpu_live": _gpu_live}
 
-FAST_SOURCES = ("hwmon", "iio", "thermal", "power_supply", "cpufreq", "devfreq", "backlight")
+FAST_SOURCES = ("hwmon", "iio", "thermal", "power_supply", "cpufreq", "devfreq", "backlight", "gpu_live")
+# Sources that run external programs and take seconds (Vulkan, GL).
+SLOW_SOURCES = ("api",)
 
 
 def collect(names=None, extra=()):
     """All readings from the named sources (default: all), with unique ids."""
     out = []
     for n in (names if names is not None else SOURCES.keys()):
-        fn = SOURCES.get(n)
+        fn = SOURCES.get(n) or HIDDEN_SOURCES.get(n)
         if fn is None:
             continue
         try:
