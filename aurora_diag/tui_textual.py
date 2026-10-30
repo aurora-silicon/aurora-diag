@@ -402,7 +402,7 @@ class Dash(App):
                       "extension_count", "features_enabled", "features_total", "format_count"):
                 rows.append(("vulkan", k, fmt(d.get(k))))
             for h in d.get("memory_heaps", []):
-                rows.append(("vulkan", "heap%d" % h["index"], "%.2f GiB, budget %s" % (h["size"] / 2**30, fmt((h.get("budget") or 0) / 2**30, "GiB"))))
+                rows.append(("vulkan", "heap%d" % h["index"], "%.2f GiB, budget %.2f GiB" % (h["size"] / 2**30, (h.get("budget") or 0) / 2**30)))
         gl = slow.get("gl") or {}
         for api in ("gl_core", "gl_compat", "gles"):
             i = gl.get(api)
@@ -534,6 +534,67 @@ class Dash(App):
 
     def action_quit_keep(self):
         self._finish(True)
+
+
+TABS = ["overview", "sensors", "clocks", "fans", "gpu", "subsys", "services", "log"]
+
+
+def _svg_to_png(svg, png):
+    """Convert with whatever this system has: rsvg-convert, cairosvg, or
+    Quick Look plus sips on macOS (then crop the square padding)."""
+    import os
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+    if shutil.which("rsvg-convert"):
+        subprocess.run(["rsvg-convert", "-w", "2000", "-o", png, svg], check=True)
+        return
+    try:
+        import cairosvg
+        cairosvg.svg2png(url=svg, write_to=png, output_width=2000)
+        return
+    except ImportError:
+        pass
+    if shutil.which("qlmanage") and shutil.which("sips"):
+        with open(svg) as f:
+            m = re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', f.read(2000))
+        w, h = (float(m.group(1)), float(m.group(2))) if m else (1970.0, 1172.4)
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["qlmanage", "-t", "-s", "2000", "-o", tmp, svg], check=True, capture_output=True)
+            shutil.move(os.path.join(tmp, os.path.basename(svg) + ".png"), png)
+        subprocess.run(["sips", "-c", str(round(2000 * h / w)), "2000", png], check=True, capture_output=True)
+        return
+    raise RuntimeError("no SVG converter: install rsvg-convert (librsvg) or python cairosvg")
+
+
+def screenshots(capture, outdir, prefix, tabs=None, theme="textual-dark", png=False, size=(160, 46)):
+    """Render tabs of a capture headlessly to SVG (Textual's own
+    screenshot) and optionally PNG. Returns the files written."""
+    import asyncio
+    import os
+    os.makedirs(outdir, exist_ok=True)
+    written = []
+
+    async def go():
+        app = Dash(None, capture, None)
+        async with app.run_test(size=size) as pilot:
+            app.theme = theme
+            await pilot.pause(0.5)
+            for t in tabs or TABS:
+                app.query_one(TabbedContent).active = "tab-" + t
+                await pilot.pause(0.4)
+                name = "%s-%s.svg" % (prefix, t)
+                app.save_screenshot(name, outdir)
+                written.append(os.path.join(outdir, name))
+
+    asyncio.run(go())
+    if png:
+        for svg in list(written):
+            out = svg[:-4] + ".png"
+            _svg_to_png(svg, out)
+            written.append(out)
+    return written
 
 
 def run(args, m):

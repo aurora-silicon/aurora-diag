@@ -4,7 +4,7 @@ A bring-up Swiss Army knife for Linux on Apple silicon Macs. It shows everything
 
 It is a development tool. No image installs it and no package depends on it. Install it on purpose when you are testing or bringing up a machine.
 
-![Overview, M4 Pro](docs/screenshots/j616s-overview.svg)
+![Overview, M4 Pro](docs/screenshots/j616s-overview.png)
 
 ## Quick start
 
@@ -55,12 +55,16 @@ The JSON formats (`check`, `snapshot`, `diff`, the log) carry a `schema` and a `
 
 `aurora-diag tui` opens a tabbed dashboard (Overview, Sensors, Clocks, Fans, GPU, Subsystems, Services, Log) with status chips, live sparklines and the terminal's light or dark theme (`d` switches). It needs Textual (`python3-textual`, `python-textual`, `python3Packages.textual`); without it the plain curses view runs instead (`--curses` forces it).
 
-`aurora-diag tui --dump FILE` captures what the dashboard shows (with ten seconds of samples), and `aurora-diag tui --snapshot FILE` shows such a capture on any machine, read only. The screenshots here are captures from the M4 Pro, M1 Pro and M2.
+`aurora-diag tui --dump FILE` captures what the dashboard shows (with ten seconds of samples), and `aurora-diag tui --snapshot FILE` shows such a capture on any machine, read only. The screenshots here are captures from the M4 Pro, M1 Pro and M2, rendered with
+
+    aurora-diag screenshot CAPTURE.json --png [--tab overview,gpu] [--light] [--host NAME] [-o DIR]
+
+which runs the dashboard headlessly, saves Textual's SVG screenshot of each tab and converts it to a 2000 px wide PNG with `rsvg-convert`, `cairosvg`, or on macOS Quick Look plus `sips` (the square thumbnail is cropped to the 1970 x 1172 view box: `qlmanage -t -s 2000 -o OUT file.svg`, then `sips -c 1190 2000 file.png`).
 
 | | |
 | --- | --- |
-| ![GPU](docs/screenshots/j616s-gpu.svg) | ![Subsystems](docs/screenshots/j616s-subsys.svg) |
-| ![Clocks, M1 Pro](docs/screenshots/m1pro-clocks.svg) | ![Overview, light theme](docs/screenshots/j616s-light-overview.svg) |
+| ![GPU](docs/screenshots/j616s-gpu.png) | ![Subsystems](docs/screenshots/j616s-subsys.png) |
+| ![Clocks, M1 Pro](docs/screenshots/m1pro-clocks.png) | ![Overview, light theme](docs/screenshots/j616s-light-overview.png) |
 
 Keys: `e` edits the selected writable value on the Sensors tab, `r` restores this session's changes, `a` hands the fans back to the SMC, `/` filters, `q` quits and restores, `K` quits and keeps the changes.
 

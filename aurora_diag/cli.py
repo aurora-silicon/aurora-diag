@@ -511,6 +511,22 @@ def cmd_services(args, m):
     report(args, services.all_services())
 
 
+def cmd_screenshot(args, m):
+    try:
+        from . import dashboard, tui_textual
+    except ImportError as e:
+        raise control.Refused("screenshots need Textual (python3-textual): %s" % e)
+    cap = dashboard.load(args.snapshot)
+    if args.host:
+        cap["host"] = args.host
+    files = tui_textual.screenshots(cap, args.output, args.prefix or cap.get("host", "capture"),
+                                    args.tab.split(",") if args.tab else None,
+                                    "textual-light" if args.light else "textual-dark", args.png)
+    log.event("screenshot", files=files)
+    for f in files:
+        print(f)
+
+
 def cmd_tui(args, m):
     if args.dump:
         from . import dashboard
@@ -642,6 +658,14 @@ def parser():
     x = sub.add_parser("subsys", help="every hardware block: DT, driver, firmware, devices, last error")
     x.add_argument("--all", action="store_true", help="include infrastructure nodes (DARTs, mailboxes, ...)")
     sub.add_parser("services", help="userspace services, Touch ID state, speaker protection")
+    x = sub.add_parser("screenshot", help="render dashboard tabs of a capture to SVG (and PNG with --png)")
+    x.add_argument("snapshot", help="a capture from `tui --dump FILE`")
+    x.add_argument("-o", "--output", default=".", help="directory (default .)")
+    x.add_argument("--prefix", help="file name prefix (default: the capture's host)")
+    x.add_argument("--host", help="show this name instead of the capture's hostname")
+    x.add_argument("--tab", help="comma list: " + "overview,sensors,clocks,fans,gpu,subsys,services,log")
+    x.add_argument("--light", action="store_true", help="light theme")
+    x.add_argument("--png", action="store_true", help="also write PNGs (rsvg-convert, cairosvg, or qlmanage+sips on macOS)")
     x = sub.add_parser("tui", help="interactive dashboard for humans")
     x.add_argument("--snapshot", help="show a saved `list --json` capture instead of this machine (read only)")
     x.add_argument("--curses", action="store_true", help="the plain curses view even when Textual is installed")
@@ -653,7 +677,7 @@ def parser():
 COMMANDS = {
     "machine": cmd_machine, "sensors": cmd_sensors, "list": cmd_sensors, "log": cmd_log,
     "report": cmd_report, "gpu": cmd_gpu, "check": cmd_check, "snapshot": cmd_snapshot,
-    "diff": cmd_diff, "clocks": cmd_clocks, "subsys": cmd_subsys, "services": cmd_services, "summary": cmd_summary, "get": cmd_get,
+    "diff": cmd_diff, "screenshot": cmd_screenshot, "clocks": cmd_clocks, "subsys": cmd_subsys, "services": cmd_services, "summary": cmd_summary, "get": cmd_get,
     "set": cmd_set, "watch": cmd_watch, "fan": cmd_fan, "fan-guard": cmd_fan_guard,
     "haptic": cmd_haptic, "display": cmd_display, "kbd": cmd_kbd, "audio": cmd_audio,
     "journal": cmd_journal, "restore": cmd_restore, "tui": cmd_tui, "log-path": cmd_log_path,
