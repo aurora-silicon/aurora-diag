@@ -1,0 +1,23 @@
+pkgname=aurora-diag
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Bring-up diagnostics for Apple silicon Macs (development only)'
+arch=('any')
+url='https://github.com/aurora-silicon/aurora-diag'
+license=('MIT')
+_commit=@COMMIT@
+depends=('python')
+optdepends=('alsa-utils: ALSA control readout'
+            'glib2: Mutter power save through gdbus')
+makedepends=('git' 'make')
+source=("aurora-diag::git+$url.git#commit=$_commit")
+sha256sums=('SKIP')
+check() {
+  cd aurora-diag
+  make check
+}
+package() {
+  cd aurora-diag
+  make install DESTDIR="$pkgdir" PREFIX=/usr
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

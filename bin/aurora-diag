@@ -1,0 +1,16 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: MIT
+# Runs from a source checkout as well as from an installed package
+# (the package lives in ../share/aurora-diag next to this script).
+import os
+import sys
+
+here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+for cand in (here, os.path.join(here, "share", "aurora-diag")):
+    if os.path.isdir(os.path.join(cand, "aurora_diag")):
+        sys.path.insert(0, cand)
+        break
+
+from aurora_diag.cli import main  # noqa: E402
+
+sys.exit(main())
