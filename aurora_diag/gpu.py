@@ -336,7 +336,14 @@ def readings(live_only=False):
 def _env():
     env = dict(os.environ)
     if not env.get("XDG_RUNTIME_DIR"):
-        env["XDG_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="aurora-diag-xdg-")
+        # One private directory per user, reused, so repeated runs leave
+        # nothing behind.
+        d = os.path.join(tempfile.gettempdir(), "aurora-diag-xdg-%d" % os.getuid())
+        try:
+            os.makedirs(d, mode=0o700, exist_ok=True)
+            env["XDG_RUNTIME_DIR"] = d
+        except OSError:
+            pass
     env.pop("DISPLAY", None)
     env.pop("WAYLAND_DISPLAY", None)
     return env
