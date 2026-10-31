@@ -447,9 +447,10 @@ def gpu(slow=None):
     plausible = [v for v in temps.values() if v >= 15]
     t = max(plausible) if plausible else None
     if temps:
-        items.append(item("temperature", "ok" if plausible else "warn",
+        # With the GPU power-gated its SMC sensors read near 0 C; that is not a fault.
+        items.append(item("temperature", "ok",
                           ("%d GPU sensors, hottest %.1f C" % (len(temps), t)) if plausible else
-                          "%d hwmon channels labelled GPU but none reads like a die temperature (%s C)" % (
+                          "%d GPU sensors, none above 15 C right now (%s C): the GPU is power-gated, or the SMC keys are not die temperatures" % (
                               len(temps), ", ".join("%g" % v for v in sorted(set(temps.values()))[:6]))))
     else:
         items.append(item("temperature", "absent", "no hwmon temperature labelled GPU"))
