@@ -96,7 +96,11 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
         if base:
             was = base.get("services", {}).get(u["unit"])
             if was == "active" and u["active"] != "active":
-                lvl, why = "fail", "active in the baseline, now " + u["active"]
+                if u["active"] == "inactive" and u["enabled"] in ("static", "indirect", "disabled") and u.get("result") in ("success", None, ""):
+                    # D-Bus or socket activated (fprintd): runs while someone uses it.
+                    lvl, why = "pass", "on-demand unit, idle now (active in the baseline); last result %s" % u.get("result")
+                else:
+                    lvl, why = "fail", "active in the baseline, now " + u["active"]
         if lvl != "skip" or base:
             out.append(_r("service", u["unit"], lvl, why))
 
