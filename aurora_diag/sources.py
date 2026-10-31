@@ -54,13 +54,13 @@ PSY_UNITS = [
 PSY_PRIVATE = {"serial_number"}
 
 INTERESTING_MODULES = re.compile(
-    r"(apple|macsmc|asahi|dockchannel|tps6598x|snd_soc|tas27|cs42l|tipd|"
+    r"(apple|macsmc|aurora|asahi|dockchannel|tps6598x|snd_soc|tas27|cs42l|tipd|"
     r"dcp|aop|sep|pmp|pmgr|spi_apple|nvme_apple|pcie_apple|thunderbolt|"
     r"hid_magicmouse|brcmfmac|hci_bcm|mt79|spmi|rtkit|i2c_apple|dwc3|"
     r"typec|ucsi|cpufreq|thermal)")
 
 APPLE_DRIVERS = re.compile(
-    r"(apple|macsmc|asahi|dcp|aop|sep|pmp|pmgr|rtkit|dockchannel|iio_aop|"
+    r"(apple|macsmc|aurora|asahi|dcp|aop|sep|pmp|pmgr|rtkit|dockchannel|iio_aop|"
     r"snd_soc_apple|snd-soc-macaudio|nvme-apple|pcie-apple|dwc3|tps6598x|"
     r"spmi|isp|avd|mca|admac|dart|sio|thunderbolt)")
 
@@ -68,6 +68,8 @@ APPLE_DRIVERS = re.compile(
 DEBUGFS_ALLOW = [
     re.compile(r"^apple-pmc(/.*)?$"),
     re.compile(r"^apple-pmp-report(/.*)?$"),
+    # The GPU driver: aurora-g1x, and asahi-g1x on kernels before the rename.
+    re.compile(r"^aurora[^/]*(/.*)?$"),
     re.compile(r"^asahi[^/]*(/.*)?$"),
     re.compile(r"^[0-9a-f]+\.power-management:[^/]+(/status)?$"),
     re.compile(r"^regulator/regulator_summary$"),
@@ -83,7 +85,7 @@ DEBUGFS_ALLOW = [
 
 # Directories the debugfs walk may enter.
 DEBUGFS_DIRS = re.compile(
-    r"^(apple-pmc|apple-pmp-report|asahi[^/]*|[0-9a-f]+\.power-management:[^/]+|"
+    r"^(apple-pmc|apple-pmp-report|aurora[^/]*|asahi[^/]*|[0-9a-f]+\.power-management:[^/]+|"
     r"regulator|pm_genpd|usb|dri|dri/\d+|remoteproc|macsmc)(/[^/]+)*$")
 
 

@@ -134,7 +134,7 @@ _GENERIC = {"driver", "driver_override", "modalias", "uevent", "of_node", "subsy
 
 def driver_attrs(dev):
     """{name: (path, text)} for every readable file the driver added to its
-    device directory (agx_stats, gpu_memory, ... on asahi)."""
+    device directory (agx_stats, gpu_memory, ... on the AGX driver)."""
     out = {}
     for f in sysfs.listdir(dev):
         p = dev + "/" + f
