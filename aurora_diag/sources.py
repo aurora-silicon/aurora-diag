@@ -205,6 +205,14 @@ def iio():
             label = None
             if "illuminance" in f:
                 unit, label = "lux", "ambient light"
+            elif "_cct" in f:
+                unit, label = "K", "colour temperature"
+            elif "anglvel" in f:
+                unit, label = ("rad/s" if f.endswith("_raw") else None), "gyroscope"
+            elif "accel" in f:
+                unit, label = ("m/s^2" if f.endswith("_raw") else None), "accelerometer"
+            elif "magn" in f:
+                label = "magnetometer"
             elif "angl" in f:
                 unit, label = "deg", "lid angle" if "las" in dev or "lid" in dev else "angle"
             elif "temp" in f:

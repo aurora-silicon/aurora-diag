@@ -1,6 +1,15 @@
 # SPDX-License-Identifier: MIT
-"""The dashboard (Textual). Tabs: Overview, Sensors, Clocks, Fans, GPU,
-ANE, vs macOS, Subsystems, Services, Log.
+"""The dashboard (Textual).
+
+Overview: one tile per category (Health, Thermal, CPU, GPU, Memory,
+Display, Radio, Storage, Power, Audio, Engines, Sensors, System, and the
+coverage table). Click a tile, or move to it and press Enter, for its
+drill-down: the category's items (present, or absent and why) and every
+table behind it, live, with the tile's history on top. The same
+drill-downs print with `aurora-diag show NAME [--json]`.
+
+Tabs: Overview, Sensors, Clocks, Fans, GPU, ANE, vs macOS, Subsystems,
+Services, Coverage, Log.
 
 Rendering only: the numbers come from dashboard.py, live or from a
 capture. Changes go through the same policy, journal and log as the CLI
@@ -11,23 +20,24 @@ on light and dark terminals (d switches theme).
 
 import collections
 import json
-import time
 
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
-from textual.screen import ModalScreen
+from textual.containers import Grid, Vertical, VerticalScroll
 from textual.coordinate import Coordinate
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (DataTable, Footer, Header, Input, Label, RichLog, Sparkline, Static,
                              TabbedContent, TabPane)
 
-from . import ane, control, dashboard, fans, log, subsystems
+from . import ane, control, dashboard, fans, log, sections, subsystems
 
 LEVEL_STYLE = {"ok": "bold green", "pass": "bold green", "warn": "bold dark_orange", "fail": "bold red",
-               "off": "dim", "skip": "dim", "active": "bold green", "failed": "bold red"}
-CHIP_CLASS = {"ok": "ok", "pass": "ok", "warn": "warn", "fail": "fail", "off": "off", "skip": "off"}
+               "off": "dim", "skip": "dim", "absent": "dim", "active": "bold green", "failed": "bold red"}
+CHIP_CLASS = {"ok": "ok", "pass": "ok", "warn": "warn", "fail": "fail", "off": "off", "skip": "off", "absent": "off"}
+CTRL = __import__("re").compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+MAX_TABLES = 40
 
 
 def chip(level, text=None):
@@ -35,40 +45,182 @@ def chip(level, text=None):
     return Text(" %s " % (text or lvl.upper()), style=LEVEL_STYLE.get(lvl, "dim") + " reverse")
 
 
-CTRL = __import__("re").compile(r"[\x00-\x08\x0b-\x1f\x7f]")
-
-
-def fmt(v, unit=None, precision=2):
+def fmt(v, unit=None, width=70, precision=None):
     if isinstance(v, float):
-        v = ("%.*f" % (precision, v)).rstrip("0").rstrip(".")
+        v = ("%.*f" % (precision, v)).rstrip("0").rstrip(".") if precision is not None else "%.6g" % v
     s = CTRL.sub("", v if isinstance(v, str) else json.dumps(v, default=str))
-    if len(s) > 70:
-        s = s[:67] + "..."
+    if len(s) > width:
+        s = s[:width - 3] + "..."
     return s + ((" " + unit) if unit else "")
 
 
-class Card(Vertical):
-    """A titled metric with an optional sparkline."""
+def fill(t, rows):
+    """Refresh a table without moving the view.
 
-    def __init__(self, title, key=None, spark=False, **kw):
-        super().__init__(**kw)
-        self.title, self.key, self.spark = title, key, spark
+    Same shape: update only the cells that changed, so scroll position and
+    cursor stay put. New shape: add or remove trailing rows in place.
+    Clearing the table resets Textual's cursor and can schedule a later
+    scroll-to-cursor.
+    """
+    rows = [tuple(CTRL.sub("", c) if isinstance(c, str) else c for c in r) for r in rows]
+    if rows and t.row_count == len(rows) and len(t.columns) == len(rows[0]):
+        for y, r in enumerate(rows):
+            for x, v in enumerate(r):
+                c = Coordinate(y, x)
+                if t.get_cell_at(c) != v:
+                    t.update_cell_at(c, v)
+        return
+    sx, sy, row = t.scroll_x, t.scroll_y, t.cursor_row
+    if rows and len(t.columns) != len(rows[0]):
+        t.clear()
+    keys = list(t.rows)
+    for key in reversed(keys[len(rows):]):
+        t.remove_row(key)
+    for y, r in enumerate(rows):
+        if y >= len(keys):
+            t.add_row(*r)
+        else:
+            for x, v in enumerate(r):
+                c = Coordinate(y, x)
+                if t.get_cell_at(c) != v:
+                    t.update_cell_at(c, v)
+    if rows:
+        try:
+            t.move_cursor(row=min(row, len(rows) - 1), scroll=False)
+        except TypeError:   # older Textual without the scroll argument
+            t.move_cursor(row=min(row, len(rows) - 1))
+    t.scroll_to(sx, sy, animate=False)
+
+
+def set_columns(t, cols):
+    cols = [str(c) for c in cols]
+    have = [str(c.label) for c in t.columns.values()]
+    if have != cols:
+        t.clear(columns=True)
+        t.add_columns(*cols)
+
+
+class Tile(Vertical, can_focus=True):
+    """A category on the overview: click or Enter opens its drill-down."""
+
+    BINDINGS = [Binding("enter", "open", "Open", show=False)]
+
+    def __init__(self, name, title, **kw):
+        super().__init__(id="tile-" + name, **kw)
+        self.cat, self.title_text = name, title
 
     def compose(self) -> ComposeResult:
-        yield Label(self.title, classes="card-title")
-        yield Static("-", classes="card-value", id="v-" + self.id)
-        if self.spark:
-            yield Sparkline([], id="s-" + self.id, summary_function=max)
+        yield Label(self.title_text, classes="card-title")
+        yield Static("-", classes="card-value")
+        yield Sparkline([], summary_function=max)
 
     def set(self, value, history=None, level=None):
-        v = self.query_one(".card-value", Static)
-        v.update(value)
+        self.query_one(".card-value", Static).update(value)
         for c in ("ok", "warn", "fail", "off"):
             self.remove_class(c)
         if level:
             self.add_class(CHIP_CLASS.get(level, "off"))
-        if self.spark and history:
-            self.query_one(Sparkline).data = list(history)
+        sp = self.query_one(Sparkline)
+        if history:
+            sp.data = list(history)
+            sp.display = True
+        else:
+            sp.display = False
+
+    def on_click(self):
+        self.action_open()
+
+    def action_open(self):
+        self.app.open_detail(self.cat)
+
+
+class Detail(Screen):
+    """One category's drill-down, refreshed live from the app's data."""
+
+    BINDINGS = [Binding("escape", "back", "Back"), Binding("q", "back", "Back"),
+                Binding("/", "focus_filter", "Filter rows")]
+
+    def __init__(self, cat):
+        super().__init__()
+        self.cat = cat
+        self.filter = ""
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        yield Static("", id="d-head")
+        yield Sparkline([], id="d-spark", summary_function=max)
+        yield Input(placeholder="filter rows (substring)", id="d-filter")
+        with VerticalScroll(id="d-body"):
+            yield Label("Status", classes="t-title")
+            yield DataTable(id="d-items", zebra_stripes=True, cursor_type="row", classes="auto")
+            for i in range(MAX_TABLES):
+                yield Label("", id="d-tt%d" % i, classes="t-title")
+                yield DataTable(id="d-t%d" % i, zebra_stripes=True, cursor_type="row", classes="auto")
+        yield Footer()
+
+    def on_mount(self):
+        self._prev_sub = self.app.sub_title
+        self.query_one("#d-filter", Input).display = False
+        set_columns(self.query_one("#d-items", DataTable), ("", "item", "detail"))
+        self.update()
+
+    def on_input_changed(self, ev):
+        self.filter = ev.value.lower()
+        self.update()
+
+    def action_focus_filter(self):
+        f = self.query_one("#d-filter", Input)
+        f.display = True
+        f.focus()
+
+    def action_back(self):
+        self.app.sub_title = getattr(self, "_prev_sub", self.app.sub_title)
+        self.app.pop_screen()
+
+    def _keep(self, row):
+        return not self.filter or self.filter in " ".join(str(c) for c in row).lower()
+
+    def update(self):
+        s = self.app.section(self.cat)
+        if not s:
+            self.query_one("#d-head", Static).update("%s: collecting ..." % self.cat)
+            return
+        self.app.sub_title = s["title"]
+        self.query_one("#d-head", Static).update(Text.assemble(
+            chip(s["level"]), "  ", (s["title"], "bold"), "   ", s["headline"].replace("\n", "   ·   "),
+            ("   (%s)" % s["note"]) if s.get("note") else ""))
+        sp = self.query_one("#d-spark", Sparkline)
+        h = self.app.hist.get("section." + self.cat)
+        sp.display = bool(h)
+        if h:
+            sp.data = list(h)
+        fill(self.query_one("#d-items", DataTable),
+             [(chip(i["level"]), i["key"], fmt(i["detail"], width=150)) for i in s["items"]
+              if self._keep((i["level"], i["key"], i["detail"]))])
+        tabs = s.get("tables") or []
+        for i in range(MAX_TABLES):
+            lab = self.query_one("#d-tt%d" % i, Label)
+            t = self.query_one("#d-t%d" % i, DataTable)
+            if i >= len(tabs):
+                lab.display = t.display = False
+                continue
+            tb = tabs[i]
+            lab.display = t.display = True
+            lab.update(tb["title"])
+            set_columns(t, tb["columns"])
+            rows = []
+            for r in tb["rows"]:
+                if not self._keep(r):
+                    continue
+                cells = []
+                for k, c in enumerate(r[:len(tb["columns"])]):
+                    if k == 0 and isinstance(c, str) and c in ("pass", "warn", "fail", "skip", "ok", "off", "absent"):
+                        cells.append(chip(c))
+                    else:
+                        cells.append(fmt(c if c is not None else "", width=110))
+                cells += [""] * (len(tb["columns"]) - len(cells))
+                rows.append(tuple(cells))
+            fill(t, rows)
 
 
 class EditScreen(ModalScreen):
@@ -89,23 +241,37 @@ class EditScreen(ModalScreen):
         self.dismiss(None)
 
 
+TITLES = {"health": "Health check", "thermal": "Thermal", "cpu": "CPU", "gpu": "GPU", "memory": "Memory",
+          "display": "Display", "radio": "Radio (Wi-Fi, Bluetooth)", "storage": "Storage", "power": "Power & battery",
+          "audio": "Audio & speaker protection", "engines": "Engines (ANE, AVE, ISP, SEP, ...)",
+          "sensors": "Sensors & motion", "system": "System (PCIe, USB, suspend)"}
+
+
 class Dash(App):
     TITLE = "aurora-diag"
     CSS = """
     Screen { background: $background; }
     #overview { grid-size: 4; grid-gutter: 1 2; padding: 1 2; height: auto; }
-    Card { border: round $panel-lighten-2; padding: 0 1; height: 7; }
-    Card.ok { border: round $success; }
-    Card.warn { border: round $warning; }
-    Card.fail { border: round $error; }
+    Tile { border: round $panel-lighten-2; padding: 0 1; height: 7; }
+    Tile:hover { background: $boost; }
+    Tile:focus { border: double $accent; }
+    Tile.ok { border: round $success; }
+    Tile.warn { border: round $warning; }
+    Tile.fail { border: round $error; }
+    Tile.ok:focus, Tile.warn:focus, Tile.fail:focus, Tile.off:focus { border: double $accent; }
     .card-title { color: $text-muted; text-style: bold; }
     .card-value { text-style: bold; height: 2; }
     Sparkline { height: 2; }
+    #d-spark { height: 3; margin: 0 2; }
     DataTable { height: 1fr; }
+    DataTable.auto { height: auto; max-height: 60; margin: 0 1 1 1; }
+    .t-title { color: $accent; text-style: bold; margin: 0 1; }
+    #d-head { padding: 0 2; height: auto; }
     #banner { padding: 0 2; height: auto; color: $text-muted; }
+    #hint { padding: 0 2; color: $text-muted; }
     #edit { width: 70; height: auto; padding: 1 2; border: thick $accent; background: $surface; }
     .dim { color: $text-muted; }
-    Input#filter { margin: 0 1; }
+    Input#filter, Input#d-filter { margin: 0 1; }
     """
     BINDINGS = [
         Binding("q", "quit_restore", "Quit"),
@@ -132,15 +298,11 @@ class Dash(App):
         with TabbedContent(initial="tab-overview"):
             with TabPane("Overview", id="tab-overview"):
                 with VerticalScroll():
+                    yield Static("Click a tile, or Tab to it and press Enter, for the details. Esc goes back.", id="hint")
                     with Grid(id="overview"):
-                        for cid, title, spark in (
-                                ("health", "Health check", False), ("die", "Hottest die", True),
-                                ("cpu", "CPU clocks", True), ("gpu", "GPU", True),
-                                ("power", "System power", True), ("fans", "Fans", True),
-                                ("lid", "Lid angle", True), ("als", "Ambient light", True),
-                                ("battery", "Battery", False), ("speaker", "Speaker protection", True),
-                                ("vulkan", "Vulkan", False), ("gl", "OpenGL / GLES", False)):
-                            yield Card(title, id=cid, spark=spark)
+                        for n in sections.ORDER:
+                            yield Tile(n, TITLES.get(n, n))
+                        yield Tile("coverage", "Coverage (present / absent)")
             with TabPane("Sensors", id="tab-sensors"):
                 yield Input(placeholder="filter (regex-free substring)", id="filter")
                 yield DataTable(id="t-sensors", zebra_stripes=True, cursor_type="row")
@@ -160,6 +322,8 @@ class Dash(App):
                 yield DataTable(id="t-subsys", zebra_stripes=True, cursor_type="row")
             with TabPane("Services", id="tab-services"):
                 yield DataTable(id="t-services", zebra_stripes=True, cursor_type="row")
+            with TabPane("Coverage", id="tab-coverage"):
+                yield DataTable(id="t-coverage", zebra_stripes=True, cursor_type="row")
             with TabPane("Log", id="tab-log"):
                 yield RichLog(id="t-log", wrap=False, highlight=True, markup=False)
         yield Footer()
@@ -171,7 +335,8 @@ class Dash(App):
                 "t-ane": ("device", "item", "value"),
                 "t-compare": ("state", "metric", "Linux", "macOS", "delta", "sample", "context"),
                 "t-subsys": ("state", "block", "node", "driver", "firmware", "devices", "why"),
-                "t-services": ("state", "unit", "detail")}
+                "t-services": ("state", "unit", "detail"),
+                "t-coverage": ("state", "category", "item", "detail")}
         for tid, c in cols.items():
             self.query_one("#" + tid, DataTable).add_columns(*c)
         if self.capture:
@@ -192,7 +357,7 @@ class Dash(App):
 
     @work(thread=True, exclusive=True, group="fast")
     def load_fast(self):
-        f = dashboard.fast(self.m)
+        f = dashboard.fast(self.m, (self.data or {}).get("slow"))
         f["log"] = dashboard.log_tail()
         self.call_from_thread(self.apply_fast, f)
 
@@ -205,10 +370,16 @@ class Dash(App):
     def apply_fast(self, f):
         if self.data is None:
             self.data = {"machine": self.m.as_dict(), "host": "", "kernel": "", "slow": {}}
+        secs = dict(self.data.get("sections") or {})
+        secs.update(f.pop("sections", {}))
         self.data.update(f)
+        self.data["sections"] = secs
         for r in f["readings"]:
             if isinstance(r["value"], (int, float)) and not isinstance(r["value"], bool):
                 self.hist[r["id"]].append(r["value"])
+        for n, s in secs.items():
+            if n in sections.LIVE and isinstance(s.get("spark"), (int, float)):
+                self.hist["section." + n].append(s["spark"])
         self.render_all()
 
     def apply_slow(self, s):
@@ -219,7 +390,29 @@ class Dash(App):
             if k not in s and k in old:
                 s[k] = old[k]
         self.data["slow"] = s
+        secs = dict(self.data.get("sections") or {})
+        for n, v in (s.get("sections") or {}).items():
+            if n not in sections.LIVE or n not in secs:
+                secs[n] = v
+            if n not in sections.LIVE and isinstance(v.get("spark"), (int, float)):
+                self.hist["section." + n].append(v["spark"])
+        self.data["sections"] = secs
         self.render_all()
+
+    def section(self, name):
+        if name == "coverage":
+            return self.coverage_section()
+        return ((self.data or {}).get("sections") or {}).get(name)
+
+    def coverage_section(self):
+        secs = (self.data or {}).get("sections") or {}
+        rows = sections.coverage(secs)
+        n = collections.Counter(r["level"] for r in rows)
+        return sections.section("coverage", "Coverage", [], [sections.table(
+            "Every category item: present, or absent and why", ("state", "category", "item", "detail"),
+            [[r["level"], r["section"], r["item"], r["detail"]] for r in rows])],
+            headline="%d present, %d absent\n%d warn, %d fail" % (n["ok"], n["absent"] + n["off"], n["warn"], n["fail"]),
+            level="fail" if n["fail"] else "warn" if n["warn"] else "ok")
 
     # -- rendering -------------------------------------------------------------------
 
@@ -244,128 +437,30 @@ class Dash(App):
         self.render_comparison()
         self.render_subsys()
         self.render_services()
+        self.render_coverage()
         self.render_log()
-
-    def card(self, cid, value, hist_key=None, level=None):
-        try:
-            c = self.query_one("#" + cid, Card)
-        except Exception:
-            return
-        c.set(value, self.hist.get(hist_key) if hist_key else None, level)
+        if isinstance(self.screen, Detail):
+            self.screen.update()
 
     def render_overview(self):
-        rs = self.readings()
-        slow = self.data.get("slow") or {}
-        ck = slow.get("check") or {}
-        if "counts" in ck:
-            c = ck["counts"]
-            self.card("health", "%s\n%d pass  %d warn  %d fail" % (ck["result"].upper(), c["pass"], c["warn"], c["fail"]),
-                      level=ck["result"])
-        name, t = (self.data.get("hottest") or [None, None])
-        if t is not None:
-            key = next((r["id"] for r in rs if r["cat"] == "thermal" and r["attr"] == "temp"
-                        and ("zone:" + (r.get("label") or "")) == name), None)
-            self.card("die", "%.1f °C\n%s" % (t, (name or "").replace("zone:", "")), key,
-                      "fail" if t >= 95 else "warn" if t >= 85 else "ok")
-        cur = [r for r in rs if r["cat"] == "cpufreq" and r["attr"] == "scaling_cur_freq"]
-        if cur:
-            self.card("cpu", "  ".join("%s %.0f" % (r["dev"].replace("policy", "p"), r["value"]) for r in cur if isinstance(r["value"], (int, float))) + " MHz",
-                      cur[-1]["id"])
-        g = [r for r in rs if r["cat"] == "gpu"]
-        util = next((r for r in g if r["attr"] == "util"), None)
-        mem = next((r for r in g if r["attr"] == "gpu_memory/user_resident"), None)
-        pw = next((r for r in g if r["attr"] in ("cores_powered",)), None)
-        parts = []
-        if util:
-            parts.append("busy %s%%" % util["value"])
-        if mem:
-            parts.append("%.0f MiB" % (mem["value"] / 2**20))
-        if pw:
-            parts.append("cores %s" % ("on" if pw["value"] in (True, "true", 1) else "off"))
-        self.card("gpu", "  ".join(parts) or "-", util["id"] if util else (mem["id"] if mem else None))
-        tot = next((r for r in rs if r.get("label") == "Total System Power" and r["attr"].endswith("_input")), None)
-        if tot:
-            self.card("power", "%.2f W" % tot["value"], tot["id"])
-        fl = self.data.get("fans") or []
-        if fl:
-            self.card("fans", "  ".join("%s %s rpm" % (f["label"], f["rpm"]) for f in fl),
-                      next((r["id"] for r in rs if r["cat"] == "fan" and r["attr"].endswith("_input")), None))
-        else:
-            self.card("fans", "fanless", level="off")
-        for cid, unit in (("lid", "deg"), ("als", "lux")):
-            r = next((r for r in rs if r["cat"] == "iio" and r.get("unit") == unit), None)
-            if r is None:
-                r = next((r for r in rs if r["cat"] == "iio" and ("angl" if cid == "lid" else "illuminance") in r["attr"]), None)
-            if r is None:
-                self.card(cid, "not present", level="off")
-            elif isinstance(r["value"], (int, float)):
-                self.card(cid, "%s %s" % (fmt(r["value"]), "°" if cid == "lid" else "lux"), r["id"], "ok")
-            else:
-                self.card(cid, str(r["value"]), level="warn")
-        bat = {r["attr"]: r["value"] for r in rs if r["cat"] == "battery"}
-        if bat:
-            self.card("battery", "%s%%  %s\n%s W" % (bat.get("capacity"), bat.get("status"), fmt(bat.get("power_now"))))
-        sp = {r["attr"]: r for r in rs if r["cat"] == "speaker"}
-        coils = [r for r in rs if r["cat"] == "speaker" and r["attr"] in ("t_coil_C", "ff_coil_C") and isinstance(r["value"], float)]
-        svc = (sp.get("service") or {}).get("value")
-        hot = max(coils, key=lambda r: r["value"]) if coils else None
-        self.card("speaker", "%s, armed %s\nhottest coil %s" % (
-            next((r["value"] for r in rs if r["id"] == "speaker.speakerguardd.service"), "?"),
-            next((r["value"] for r in rs if r["id"] == "speaker.speakerguardd.armed"), "?"),
-            ("%.1f °C" % hot["value"]) if hot else "-"), hot["id"] if hot else None,
-            "ok" if next((r["value"] for r in rs if r["id"] == "speaker.speakerguardd.service"), "") == "active" else "warn")
-        vk = slow.get("vulkan") or {}
-        dev = next((d for d in vk.get("devices", []) if "CPU" not in (d.get("deviceType") or "")), None)
-        if dev:
-            cp = (slow.get("compliance") or {}).get("vulkan:%s" % dev.get("deviceName")) or {}
-            self.card("vulkan", "%s %s, Vulkan %s\n%d ext, conformance %s%s" % (
-                dev.get("driverName"), dev.get("driverVersion"), dev.get("apiVersion"), dev.get("extension_count", 0),
-                dev.get("conformanceVersion"), (", %d required missing" % len(cp["missing"])) if cp.get("missing") else ""),
-                level="warn" if cp.get("missing") else "ok")
-        elif "error" in vk:
-            self.card("vulkan", vk["error"][:60], level="fail")
-        gl = slow.get("gl") or {}
-        if gl.get("gl_core") or gl.get("gles"):
-            c, e = gl.get("gl_core") or {}, gl.get("gles") or {}
-            self.card("gl", "GL %s · ES %s\n%s" % ((c.get("version") or "-").split(" ")[0],
-                                                  (e.get("version") or "-").replace("OpenGL ES ", "").split(" ")[0],
-                                                  c.get("path") or e.get("path")),
-                      level="ok" if (c.get("path") or e.get("path")) == "native" else "warn")
-
-    def _fill(self, tid, rows):
-        """Refresh a table without moving the view.
-
-        Same shape: update only the cells that changed, so scroll position and cursor stay put.
-        New shape: add/remove trailing rows in place. Clearing the table
-        resets Textual's cursor and can schedule a later scroll-to-cursor.
-        """
-        rows = [tuple(CTRL.sub("", c) if isinstance(c, str) else c for c in r) for r in rows]
-        t = self.query_one("#" + tid, DataTable)
-        if rows and t.row_count == len(rows) and len(t.columns) == len(rows[0]):
-            for y, r in enumerate(rows):
-                for x, v in enumerate(r):
-                    c = Coordinate(y, x)
-                    if t.get_cell_at(c) != v:
-                        t.update_cell_at(c, v)
-            return
-        sx, sy, row = t.scroll_x, t.scroll_y, t.cursor_row
-        keys = list(t.rows)
-        for key in reversed(keys[len(rows):]):
-            t.remove_row(key)
-        for y, r in enumerate(rows):
-            if y >= len(keys):
-                t.add_row(*r)
-            else:
-                for x, v in enumerate(r):
-                    c = Coordinate(y, x)
-                    if t.get_cell_at(c) != v:
-                        t.update_cell_at(c, v)
-        if rows:
+        for n in list(sections.ORDER) + ["coverage"]:
+            s = self.section(n)
             try:
-                t.move_cursor(row=min(row, len(rows) - 1), scroll=False)
-            except TypeError:   # older Textual without the scroll argument
-                t.move_cursor(row=min(row, len(rows) - 1))
-        t.scroll_to(sx, sy, animate=False)
+                t = self.query_one("#tile-" + n, Tile)
+            except Exception:
+                continue
+            if not s:
+                t.set("collecting ...", level="off")
+                continue
+            t.set(s["headline"] or "-", self.hist.get("section." + n), s["level"])
+
+    def open_detail(self, name):
+        self.push_screen(Detail(name))
+
+    def render_coverage(self):
+        s = self.coverage_section()
+        fill(self.query_one("#t-coverage", DataTable),
+             [(chip(r[0]), r[1], r[2], fmt(r[3], width=140)) for r in s["tables"][0]["rows"]])
 
     def sensor_rows(self):
         cats = ("temp", "power", "iio", "thermal", "cooling", "battery", "fan", "speaker", "gpu", "backlight", "leds")
@@ -384,7 +479,7 @@ class Dash(App):
         for r in self._rows_sensors:
             w = Text(" w ", style="bold reverse cyan") if r.get("writable") else Text("   ")
             rows.append((w, r["id"], fmt(r["value"], r.get("unit")), r.get("label") or ""))
-        self._fill("t-sensors", rows)
+        fill(self.query_one("#t-sensors", DataTable), rows)
 
     def render_clocks(self):
         c = (self.data.get("slow") or {}).get("clocks") or {}
@@ -406,7 +501,7 @@ class Dash(App):
         if m:
             rows.append(("Memory", "%.1f GiB" % ((m.get("size_bytes") or 0) / 2**30), "", "",
                          m["speed"] if isinstance(m.get("speed"), str) else json.dumps(m.get("speed"))))
-        self._fill("t-clocks", rows)
+        fill(self.query_one("#t-clocks", DataTable), rows)
 
     def render_fans(self):
         fl = self.data.get("fans") or []
@@ -414,8 +509,9 @@ class Dash(App):
             "Fan speeds change with `aurora-diag fan set N RPM` (guarded, journalled, auto-restored) once the "
             "kernel allows it (macsmc_hwmon fan_control). Writes from here: select a fan target on Sensors and press e."
             if fl else "No fans: this machine is fanless.")
-        self._fill("t-fans", [(f["label"], fmt(f["rpm"], "rpm"), fmt(f["target"]), fmt(f["min"]), fmt(f["max"]),
-                               chip("ok", "writable") if f["target_writable"] else chip("off", "read only")) for f in fl])
+        fill(self.query_one("#t-fans", DataTable),
+             [(f["label"], fmt(f["rpm"], "rpm"), fmt(f["target"]), fmt(f["min"]), fmt(f["max"]),
+               chip("ok", "writable") if f["target_writable"] else chip("off", "read only")) for f in fl])
 
     def render_gpu(self):
         slow = self.data.get("slow") or {}
@@ -452,7 +548,7 @@ class Dash(App):
                     v.get("required_checked", v.get("checked", 0)), ", ".join(v.get("missing") or []) or "none"))))
         for p in slow.get("gpu_clients") or [] if isinstance(slow.get("gpu_clients"), list) else []:
             rows.append(("client", "%s[%d]" % (p["comm"], p["pid"]), "%.1f MiB resident, %d clients" % (p["resident_KiB"] / 1024, p["clients"])))
-        self._fill("t-gpu", rows)
+        fill(self.query_one("#t-gpu", DataTable), rows)
 
     def render_subsys(self):
         subs = (self.data.get("slow") or {}).get("subsystems")
@@ -464,15 +560,16 @@ class Dash(App):
             rows.append((chip(s["state"]["level"]), s.get("title") or s["block"], s["name"], s.get("driver") or "-",
                          subsystems.firmware_short(s), ", ".join(s.get("class_devices") or [])[:50],
                          s["state"]["why"][:90]))
-        self._fill("t-subsys", rows)
+        fill(self.query_one("#t-subsys", DataTable), rows)
 
     def render_ane(self):
         data = (self.data.get("slow") or {}).get("ane")
+        t = self.query_one("#t-ane", DataTable)
         if not isinstance(data, dict):
-            self._fill("t-ane", [("ANE", "status", "not collected in this capture")])
+            fill(t, [("ANE", "status", "not collected in this capture")])
             return
         if data.get("error"):
-            self._fill("t-ane", [("ANE", "probe", data["error"])])
+            fill(t, [("ANE", "probe", data["error"])])
             return
         rows = []
         for d in data.get("devices", []):
@@ -488,7 +585,7 @@ class Dash(App):
                 rows.append((d["node"], "last benchmark: " + key, fmt(value, precision=4)))
         for c in ane.checks(data):
             rows.append((c.get("device", "ANE"), c["name"], Text.assemble(chip(c["level"]), " " + c["reason"])))
-        self._fill("t-ane", rows)
+        fill(t, rows)
 
     def render_comparison(self):
         data = (self.data.get("slow") or {}).get("comparison") or {}
@@ -503,7 +600,7 @@ class Dash(App):
                          fmt(r["linux"], r["unit"], precision=4) if r.get("linux") is not None else "unavailable",
                          fmt(r["value"], r["unit"], precision=4), "%+.2f%%" % delta if delta is not None else "—",
                          r["measurement"], r["reason"] + "; " + r["context"]))
-        self._fill("t-compare", rows)
+        fill(self.query_one("#t-compare", DataTable), rows)
 
     def render_services(self):
         sv = (self.data.get("slow") or {}).get("services")
@@ -523,7 +620,7 @@ class Dash(App):
         sg = sv.get("speakerguardd") or {}
         rows.append((chip("ok" if sg.get("service") == "active" else "warn", "speakers"), "speakerguardd",
                      "armed %s · governor %s · hottest coil %s °C" % (sg.get("armed"), sg.get("governor"), fmt(sg.get("hottest_coil_C")))))
-        self._fill("t-services", rows)
+        fill(self.query_one("#t-services", DataTable), rows)
 
     def render_log(self):
         lg = self.query_one("#t-log", RichLog)
@@ -612,7 +709,7 @@ class Dash(App):
         self._finish(True)
 
 
-TABS = ["overview", "sensors", "clocks", "fans", "gpu", "ane", "compare", "subsys", "services", "log"]
+TABS = ["overview", "sensors", "clocks", "fans", "gpu", "ane", "compare", "subsys", "services", "coverage", "log"]
 
 
 def _svg_to_png(svg, png):
@@ -645,8 +742,9 @@ def _svg_to_png(svg, png):
 
 
 def screenshots(capture, outdir, prefix, tabs=None, theme="textual-dark", png=False, size=(160, 46)):
-    """Render tabs of a capture headlessly to SVG (Textual's own
-    screenshot) and optionally PNG. Returns the files written."""
+    """Render tabs and drill-downs (show-NAME) of a capture headlessly to
+    SVG (Textual's own screenshot) and optionally PNG. Returns the files
+    written."""
     import asyncio
     import os
     os.makedirs(outdir, exist_ok=True)
@@ -658,10 +756,18 @@ def screenshots(capture, outdir, prefix, tabs=None, theme="textual-dark", png=Fa
             app.theme = theme
             await pilot.pause(0.5)
             for t in tabs or TABS:
-                app.query_one(TabbedContent).active = "tab-" + t
-                await pilot.pause(0.4)
-                name = "%s-%s.svg" % (prefix, t)
-                app.save_screenshot(name, outdir)
+                if t.startswith("show-"):
+                    app.open_detail(t[5:])
+                    await pilot.pause(0.6)
+                    name = "%s-%s.svg" % (prefix, t)
+                    app.save_screenshot(name, outdir)
+                    app.pop_screen()
+                    await pilot.pause(0.2)
+                else:
+                    app.query_one(TabbedContent).active = "tab-" + t
+                    await pilot.pause(0.4)
+                    name = "%s-%s.svg" % (prefix, t)
+                    app.save_screenshot(name, outdir)
                 written.append(os.path.join(outdir, name))
 
     asyncio.run(go())

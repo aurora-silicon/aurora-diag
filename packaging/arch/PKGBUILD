@@ -1,5 +1,5 @@
 pkgname=aurora-diag
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc='Bring-up diagnostics and regression checks for Apple silicon Macs (development only)'
 arch=('any')
@@ -11,7 +11,10 @@ optdepends=('alsa-utils: ALSA control readout'
             'python-textual: the dashboard'
             'vulkan-tools: Vulkan report (vulkaninfo)'
             'mesa-utils: eglinfo and glxinfo summaries'
-            'glib2: Mutter power save through gdbus')
+            'glib2: Mutter power save through gdbus'
+            'iw: Wi-Fi link, band and regulatory domain'
+            'smartmontools: NVMe SMART health'
+            'bluez-utils: Bluetooth controller and paired devices')
 makedepends=('git' 'make')
 source=("aurora-diag::git+$url.git#commit=$_commit")
 sha256sums=('SKIP')

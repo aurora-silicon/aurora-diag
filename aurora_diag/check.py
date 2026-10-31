@@ -13,11 +13,9 @@ Every probe runs under a deadline (probe.timed), so a hung driver shows
 as a failed probe instead of a stalled run.
 """
 
-import json
 import os
 import re
 from collections import Counter
-import sys
 import time
 
 from . import ane, gpu, services, snapshot, subsystems, sysfs
@@ -34,7 +32,7 @@ def _r(group, name, level, reason, **extra):
     return d
 
 
-def run(machine, only=None, expect=None, api=True, timeout=8.0):
+def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
     t0 = time.monotonic()
     out = []
     base = snapshot.load(expect) if expect else None
@@ -183,6 +181,8 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
                     b = ((base.get("gpu") or {}).get("gl") or {}).get(apiname) or {}
                     if b.get("extension_count") and info["extension_count"] < b["extension_count"]:
                         lvl, why = "fail", "extensions dropped from %d: %s" % (b["extension_count"], why)
+                    elif lvl == "warn" and b.get("path") == info["path"]:
+                        lvl, why = "pass", "same %s path as the baseline: %s" % (info["path"], why)
                 out.append(_r("gpu", apiname, lvl, why))
 
     an, err = timed(ane.collect, timeout)
@@ -197,9 +197,25 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
                 if was.get("driver") and (not now or not now.get("driver")):
                     out.append(_r("ane", name, "fail", "ANE device/driver present in baseline is missing"))
 
+    if secs is None:
+        from . import sections
+        secs, err = timed(lambda: sections.collect([n for n in sections.ORDER if n != "health"]), 30)
+        if err:
+            out.append(_r("inventory", "probe", "fail", "inventory " + err))
+            secs = {}
+    out.extend(inventory_rows(secs, base))
+
+    if base and base.get("warnings") is not None:
+        known = set(base["warnings"])
+        for r in out:
+            if r["level"] == "warn" and "%s/%s" % (r["group"], r["name"]) in known:
+                r["level"], r["reason"] = "pass", "known in the baseline: " + r["reason"]
+
     if only:
         want = [w.strip().lower() for w in only.split(",") if w.strip()]
-        out = [r for r in out if any(w in r["group"].lower() or w in r["name"].lower() for w in want)]
+        # Category rows match by their group or category name (--only display, --only radio).
+        out = [r for r in out if any(w in r["group"].lower() or (w == r.get("section") if r["group"] == "inventory"
+                                                                  else w in r["name"].lower()) for w in want)]
     worst = max([LEVELS[r["level"]] for r in out] + [0])
     return {"schema": SCHEMA, "version": SCHEMA_VERSION,
             "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -207,6 +223,38 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
             "baseline": expect, "result": {0: "pass", 1: "warn", 2: "fail"}[worst], "exit": worst,
             "counts": {k: sum(1 for r in out if r["level"] == k) for k in ("pass", "warn", "fail", "skip")},
             "checks": out, "elapsed_s": round(time.monotonic() - t0, 2)}
+
+
+# Items whose presence follows what is plugged in, not the kernel.
+VOLATILE = re.compile(r"^(display/(DP|HDMI|USB|DSI)-|system/(USB4|Type-C)|power/external power|radio/other)")
+
+
+def inventory_rows(secs, base=None):
+    """One row per category item (sections.py): ok passes, warn warns, a
+    fail fails, absent and off are skipped with their reason. With a
+    baseline, an item that was ok there and is absent or failing now fails,
+    and a warning the baseline shares passes as a known gap."""
+    from . import sections
+    out = []
+    bitems = (base or {}).get("inventory_items") or {}
+    seen = set()
+    for row in sections.coverage(secs):
+        key = "%s/%s" % (row["section"], row["item"])
+        seen.add(key)
+        lvl = {"ok": "pass", "warn": "warn", "fail": "fail"}.get(row["level"], "skip")
+        why = ("%s: %s" % (row["level"], row["detail"])) if lvl == "skip" else row["detail"]
+        if base is not None and key in bitems:
+            b = bitems[key]
+            if b == "ok" and row["level"] in ("absent", "fail", "warn") and not VOLATILE.match(key):
+                lvl, why = ("fail" if row["level"] != "warn" else "warn"), "ok in the baseline, now %s: %s" % (row["level"], row["detail"])
+            elif lvl in ("warn", "fail") and b == row["level"]:
+                lvl, why = "pass", "same as baseline: " + row["detail"]
+        out.append(_r("inventory", key, lvl, why[:300], section=row["section"]))
+    if base is not None:
+        for key, b in sorted(bitems.items()):
+            if key not in seen and b == "ok" and not VOLATILE.match(key) and key.split("/")[0] in secs:
+                out.append(_r("inventory", key, "fail", "ok in the baseline, gone now", section=key.split("/")[0]))
+    return out
 
 
 def _v(s):
