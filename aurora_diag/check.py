@@ -181,6 +181,8 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
                     b = ((base.get("gpu") or {}).get("gl") or {}).get(apiname) or {}
                     if b.get("extension_count") and info["extension_count"] < b["extension_count"]:
                         lvl, why = "fail", "extensions dropped from %d: %s" % (b["extension_count"], why)
+                    elif lvl == "warn" and b.get("path") == info["path"]:
+                        lvl, why = "pass", "same %s path as the baseline: %s" % (info["path"], why)
                 out.append(_r("gpu", apiname, lvl, why))
 
     an, err = timed(ane.collect, timeout)
