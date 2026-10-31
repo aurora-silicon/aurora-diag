@@ -12,7 +12,7 @@ import json
 import os
 import time
 
-from . import audio, check, clocks, fans, gpu, haptics, log, services, sources, subsystems
+from . import ane, audio, check, clocks, comparison, fans, gpu, haptics, log, services, sources, subsystems
 from .probe import timed
 
 SCHEMA = "aurora-diag/dashboard"
@@ -27,11 +27,15 @@ def slow(m, api=True):
     out = {"t": time.time()}
     for key, fn, to in (("subsystems", subsystems.subsystems, 10), ("services", services.all_services, 10),
                         ("clocks", clocks.all_clocks, 10), ("haptics", lambda: haptics.status(m), 5),
+                        ("ane", ane.collect, 8),
                         ("check", lambda: check.run(m, api=False), 15),
                         ("gpu_devices", lambda: [dict(d, name=n) for n, d in gpu.gpu_names()], 5),
                         ("gpu_clients", gpu.per_process, 5)):
         v, err = timed(fn, to)
         out[key] = v if err is None else {"error": err}
+    v, err = timed(lambda: comparison.build(m.as_dict(), sources.collect(["hwmon"]),
+                                           out.get("clocks") or {}, out.get("ane") or {}), 8)
+    out["comparison"] = v if err is None else {"error": err}
     if api:
         vk, err = timed(gpu.vulkan, 60)
         gl, err2 = timed(gpu.gl, 60, False)

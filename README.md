@@ -13,13 +13,15 @@ It is a development tool. No image installs it and no package depends on it. Ins
     aurora-diag check --expect good.json # after a kernel update: anything missing fails
     aurora-diag diff good.json new.json  # what changed between two boots
     aurora-diag report -o .              # one JSON plus text file to attach to a bug
+    aurora-diag ane --json               # ANE status and saved benchmark, no workload launched
+    aurora-diag compare --json           # live readings vs the J616s macOS baseline
     aurora-diag tui                      # the dashboard
 
 Reading needs no privileges, though root sees more (debugfs, dmesg, speakerguardd's state, the actuator's reports). Changes need root.
 
 ## What it covers
 
-Nothing is a per-machine table. Every source walks a kernel class, bus or the device tree, so a driver that appears during bring-up shows up without a change here, and a machine without fans simply has no fan rows.
+Sources walk a kernel class, bus or the device tree, so a driver that appears during bring-up shows up without a change here, and a machine without fans simply has no fan rows. ANE generation names use known SoC compatibles or an explicit generation attribute; the optional macOS comparison is specific to the J616s.
 
 | area | source |
 | --- | --- |
@@ -27,6 +29,8 @@ Nothing is a per-machine table. Every source walks a kernel class, bus or the de
 | clocks | cpufreq policies (current, min, max, the DVFS ladder, time in state), every `opp-table*` in the device tree with the nodes that use it (CPU clusters, GPU), devfreq, memory size and whatever the kernel says about memory speed |
 | fans | speed, target, limits; manual speed under a guard (below) |
 | GPU | DRM devices, kernel driver version, the driver's own attributes (`agx_stats`, `gpu_memory`, ...), its debugfs reports, GPU temperatures, per-process GPU memory from fdinfo, busy percentage where the driver reports busy time |
+| ANE | `/sys/class/accel` devices bound to an ANE driver or with ANE DT compatibles: driver, H13..H17 generation, firmware and its source, clients, performance level, runtime power state, cumulative statistics/error counters, wedged status and saved benchmark |
+| vs macOS | bundled JSON export of J616s `COMPARE.md` (2026-10-31): CPU DVFS ladders, power rails, CPU die temperature and matching saved ANE results. Current readings have descriptive deltas; they do not establish equal workload conditions |
 | Vulkan | instance version, every device (name, driver name and ID, driver info, API version, conformance version), extension, feature and format counts, limits, memory heaps, queue families (`vulkaninfo`) |
 | OpenGL, GLES | desktop GL core and compatibility and GLES through EGL with no display (surfaceless, then GBM): vendor, renderer, version, profile, GLSL version, every extension, key limits, and whether the path is native, Zink or llvmpipe. `eglinfo -B` and `glxinfo -B` are added when present |
 | compliance | Vulkan conformance version and the features the spec makes mandatory for the claimed API version; GL 4.6 and GLES 3.2 limits against the spec minimums ([docs/COMPLIANCE.md](docs/COMPLIANCE.md)) |
@@ -53,7 +57,7 @@ The JSON formats (`check`, `snapshot`, `diff`, the log) carry a `schema` and a `
 
 ## The dashboard
 
-`aurora-diag tui` opens a tabbed dashboard (Overview, Sensors, Clocks, Fans, GPU, Subsystems, Services, Log) with status chips, live sparklines and the terminal's light or dark theme (`d` switches). It needs Textual (`python3-textual`, `python-textual`, `python3Packages.textual`); without it the plain curses view runs instead (`--curses` forces it).
+`aurora-diag tui` opens a tabbed dashboard (Overview, Sensors, Clocks, Fans, GPU, ANE, vs macOS, Subsystems, Services, Log) with status chips, live sparklines and the terminal's light or dark theme (`d` switches). It needs Textual (`python3-textual`, `python-textual`, `python3Packages.textual`); without it the plain curses view runs instead (`--curses` forces it).
 
 `aurora-diag tui --dump FILE` captures what the dashboard shows (with ten seconds of samples), and `aurora-diag tui --snapshot FILE` shows such a capture on any machine, read only. The screenshots here are captures from the M4 Pro, M1 Pro and M2, rendered with
 
@@ -67,6 +71,20 @@ which runs the dashboard headlessly, saves Textual's SVG screenshot of each tab 
 | ![Clocks, M1 Pro](docs/screenshots/m1pro-clocks.png) | ![Overview, light theme](docs/screenshots/j616s-light-overview.png) |
 
 Keys: `e` edits the selected writable value on the Sensors tab, `r` restores this session's changes, `a` hands the fans back to the SMC, `/` filters, `q` quits and restores, `K` quits and keeps the changes.
+
+ANE and comparison rows refresh with the status probes every 15 seconds, using the same in-place cell updates as the other tables. Captures include both panels and remain viewable without hardware. Older captures show that ANE data was not collected.
+
+## ANE status and saved benchmarks
+
+`aurora-diag ane --json` emits one document; `list --source ane` exposes read-only readings. `check --only ane --no-api --json` gives agents pass/warn/fail rows. Missing telemetry, no device, unreadable counters, incomplete client visibility and absent saved benchmarks warn. An unbound/missing device node, a wedged engine, a runtime power error, or a failed saved correctness result fails. Nonzero cumulative error counters warn; they do not establish a new fault. Runtime suspension is normal and passes health checks. `snapshot` stores only stable ANE identity/firmware; `diff` and `check --expect` detect a lost ANE driver/device.
+
+Client counts come from `client_count`/`clients` when exposed, otherwise unique DRM client IDs from open descriptors for that device. Restricted `/proc` produces a lower bound (`clients_complete: false`), or unknown when no client is visible. No process names or arguments are collected. Firmware may come from a driver attribute or DT `apple,firmware-version`; the source is shown because a DT version does not confirm running firmware. Fields the driver does not expose stay unknown. An unknown chip is never guessed to be a newer generation.
+
+The tool never starts an ANE workload, boots firmware or resets an engine. If omarchy-ane-tools output has been saved, it reads `/var/lib/omarchy-ane-tools/last-benchmark.json`; `AURORA_DIAG_ANE_BENCHMARK=/path/result.json` selects another file. The packaged `omarchy-ane-smoke` prints JSON to stdout; save its output from a separate run. It currently does not persist a result automatically. The reader accepts its `name`, `chip`, numeric `die`, `available`, `errors`, `min_ms` and `median_ms` fields, and associates the result with exactly one device. Files are limited to 64 KiB and only documented fields are retained. `saved_at` is the file modification time, not proof of a fresh run. Producers should replace saved files atomically.
+
+The bundled macOS baseline contains MobileNetV1 alpha 1.0, 224x224 FP16 random-weight results: 3309 inf/s and 0.302 ms p50 at batch 1; 3788 images/s and 2.108 ms per batch at batch 8. The smoke test's add-fixture is a different workload and receives no MobileNet delta. A compatible benchmark export must explicitly identify `device`, `model: "mobilenetv1-1.0-224-random"`, `precision: "fp16"`, `batch: 1` or `8`, `ok: true`, `p50_ms`, and/or `throughput_per_s` (images per second for batch 8); it can include `generated` and `errors`. See [SCHEMA.md](docs/SCHEMA.md) for an example.
+
+`AURORA_DIAG_MACOS_BASELINE=/path/baseline.json` overrides the bundled export using the same schema. A different machine shows baseline values but suppresses deltas. Live power and temperature are observations beside an idle-on-AC baseline; check the displayed context before interpreting them. The panel never treats lower current power as a performance win or substitutes historical Linux baseline numbers for live readings. CPU ladder comparisons concern advertised states, not achieved clocks. CPU/GPU throughput, storage, network, video and other load benchmarks are not launched by this view.
 
 ## Changing things
 

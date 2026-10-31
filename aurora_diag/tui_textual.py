@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """The dashboard (Textual). Tabs: Overview, Sensors, Clocks, Fans, GPU,
-Subsystems, Services, Log.
+ANE, vs macOS, Subsystems, Services, Log.
 
 Rendering only: the numbers come from dashboard.py, live or from a
 capture. Changes go through the same policy, journal and log as the CLI
@@ -23,7 +23,7 @@ from textual.coordinate import Coordinate
 from textual.widgets import (DataTable, Footer, Header, Input, Label, RichLog, Sparkline, Static,
                              TabbedContent, TabPane)
 
-from . import control, dashboard, fans, log, subsystems
+from . import ane, control, dashboard, fans, log, subsystems
 
 LEVEL_STYLE = {"ok": "bold green", "pass": "bold green", "warn": "bold dark_orange", "fail": "bold red",
                "off": "dim", "skip": "dim", "active": "bold green", "failed": "bold red"}
@@ -38,9 +38,9 @@ def chip(level, text=None):
 CTRL = __import__("re").compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
-def fmt(v, unit=None):
+def fmt(v, unit=None, precision=2):
     if isinstance(v, float):
-        v = ("%.2f" % v).rstrip("0").rstrip(".")
+        v = ("%.*f" % (precision, v)).rstrip("0").rstrip(".")
     s = CTRL.sub("", v if isinstance(v, str) else json.dumps(v, default=str))
     if len(s) > 70:
         s = s[:67] + "..."
@@ -151,6 +151,11 @@ class Dash(App):
                 yield DataTable(id="t-fans", zebra_stripes=True, cursor_type="row")
             with TabPane("GPU", id="tab-gpu"):
                 yield DataTable(id="t-gpu", zebra_stripes=True, cursor_type="row")
+            with TabPane("ANE", id="tab-ane"):
+                yield DataTable(id="t-ane", zebra_stripes=True, cursor_type="row")
+            with TabPane("vs macOS", id="tab-compare"):
+                yield Static("", id="compare-note", classes="dim")
+                yield DataTable(id="t-compare", zebra_stripes=True, cursor_type="row")
             with TabPane("Subsystems", id="tab-subsys"):
                 yield DataTable(id="t-subsys", zebra_stripes=True, cursor_type="row")
             with TabPane("Services", id="tab-services"):
@@ -163,6 +168,8 @@ class Dash(App):
         cols = {"t-sensors": ("", "id", "value", "label"), "t-clocks": ("what", "now", "min", "max", "ladder"),
                 "t-fans": ("fan", "rpm", "target", "min", "max", "control"),
                 "t-gpu": ("section", "item", "value"),
+                "t-ane": ("device", "item", "value"),
+                "t-compare": ("state", "metric", "Linux", "macOS", "delta", "sample", "context"),
                 "t-subsys": ("state", "block", "node", "driver", "firmware", "devices", "why"),
                 "t-services": ("state", "unit", "detail")}
         for tid, c in cols.items():
@@ -233,6 +240,8 @@ class Dash(App):
         self.render_clocks()
         self.render_fans()
         self.render_gpu()
+        self.render_ane()
+        self.render_comparison()
         self.render_subsys()
         self.render_services()
         self.render_log()
@@ -327,7 +336,8 @@ class Dash(App):
         """Refresh a table without moving the view.
 
         Same shape: update only the cells that changed, so scroll position and cursor stay put.
-        New shape: rebuild, then restore the scroll offset and the cursor without scrolling to it.
+        New shape: add/remove trailing rows in place. Clearing the table
+        resets Textual's cursor and can schedule a later scroll-to-cursor.
         """
         rows = [tuple(CTRL.sub("", c) if isinstance(c, str) else c for c in r) for r in rows]
         t = self.query_one("#" + tid, DataTable)
@@ -339,9 +349,17 @@ class Dash(App):
                         t.update_cell_at(c, v)
             return
         sx, sy, row = t.scroll_x, t.scroll_y, t.cursor_row
-        t.clear()
-        for r in rows:
-            t.add_row(*r)
+        keys = list(t.rows)
+        for key in reversed(keys[len(rows):]):
+            t.remove_row(key)
+        for y, r in enumerate(rows):
+            if y >= len(keys):
+                t.add_row(*r)
+            else:
+                for x, v in enumerate(r):
+                    c = Coordinate(y, x)
+                    if t.get_cell_at(c) != v:
+                        t.update_cell_at(c, v)
         if rows:
             try:
                 t.move_cursor(row=min(row, len(rows) - 1), scroll=False)
@@ -447,6 +465,45 @@ class Dash(App):
                          subsystems.firmware_short(s), ", ".join(s.get("class_devices") or [])[:50],
                          s["state"]["why"][:90]))
         self._fill("t-subsys", rows)
+
+    def render_ane(self):
+        data = (self.data.get("slow") or {}).get("ane")
+        if not isinstance(data, dict):
+            self._fill("t-ane", [("ANE", "status", "not collected in this capture")])
+            return
+        if data.get("error"):
+            self._fill("t-ane", [("ANE", "probe", data["error"])])
+            return
+        rows = []
+        for d in data.get("devices", []):
+            for key in ("driver", "generation", "firmware_version", "firmware_source", "client_count", "clients_complete",
+                        "performance_level", "power_state", "wedged"):
+                rows.append((d["node"], key, fmt(d.get(key)) if d.get(key) is not None else "unknown / not exposed"))
+            for section in ("counters", "error_counters"):
+                if not d.get(section):
+                    rows.append((d["node"], section, "not exposed"))
+                for key, value in sorted((d.get(section) or {}).items()):
+                    rows.append((d["node"], section + "." + key, fmt(value)))
+            for key, value in (d.get("last_benchmark") or {}).items():
+                rows.append((d["node"], "last benchmark: " + key, fmt(value, precision=4)))
+        for c in ane.checks(data):
+            rows.append((c.get("device", "ANE"), c["name"], Text.assemble(chip(c["level"]), " " + c["reason"])))
+        self._fill("t-ane", rows)
+
+    def render_comparison(self):
+        data = (self.data.get("slow") or {}).get("comparison") or {}
+        note = data.get("error") or (
+            "%s · %s · %s · refreshed with status probes (15 s). Deltas describe readings; workload conditions are unverified."
+            % (data.get("machine", "baseline not collected"), data.get("os", ""), data.get("captured", "")))
+        self.query_one("#compare-note", Static).update(Text(note))
+        rows = []
+        for r in data.get("rows", []):
+            delta = r.get("delta_pct")
+            rows.append((chip(r["level"]), r["label"],
+                         fmt(r["linux"], r["unit"], precision=4) if r.get("linux") is not None else "unavailable",
+                         fmt(r["value"], r["unit"], precision=4), "%+.2f%%" % delta if delta is not None else "—",
+                         r["measurement"], r["reason"] + "; " + r["context"]))
+        self._fill("t-compare", rows)
 
     def render_services(self):
         sv = (self.data.get("slow") or {}).get("services")
@@ -555,7 +612,7 @@ class Dash(App):
         self._finish(True)
 
 
-TABS = ["overview", "sensors", "clocks", "fans", "gpu", "subsys", "services", "log"]
+TABS = ["overview", "sensors", "clocks", "fans", "gpu", "ane", "compare", "subsys", "services", "log"]
 
 
 def _svg_to_png(svg, png):
