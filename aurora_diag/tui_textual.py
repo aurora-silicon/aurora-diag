@@ -475,9 +475,12 @@ class Dash(App):
             self._fill("t-ane", [("ANE", "probe", data["error"])])
             return
         rows = []
+        for n in data.get("dt_nodes", []):
+            for key in ("status", "compatible", "generation", "driver"):
+                rows.append((n["path"], key, fmt(n.get(key)) if n.get(key) is not None else "unknown / unbound"))
         for d in data.get("devices", []):
-            for key in ("driver", "generation", "firmware_version", "firmware_source", "client_count", "clients_complete",
-                        "performance_level", "power_state", "wedged"):
+            for key in ("driver", "generation", "dt_status", "compatible", "firmware_version", "firmware_source", "client_count", "clients_complete",
+                        "performance_level", "memory_vote", "performance_error", "power_state", "wedged"):
                 rows.append((d["node"], key, fmt(d.get(key)) if d.get(key) is not None else "unknown / not exposed"))
             for section in ("counters", "error_counters"):
                 if not d.get(section):

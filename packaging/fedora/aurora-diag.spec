@@ -1,6 +1,6 @@
 %global commit @COMMIT@
 Name: aurora-diag
-Version: 0.2.0
+Version: 0.2.1
 Release: 1%{?dist}
 Summary: Bring-up diagnostics for Apple silicon Macs (development only)
 License: MIT
@@ -41,6 +41,9 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_datadir}/applications/org.aurorasilicon.Diag.desktop
 
 %changelog
+* Sat Oct 31 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.2.1-1
+- Read-only ANE DT, binding and performance diagnostics with generation fixtures.
+
 * Fri Oct 30 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.2.0-1
 - GPU, Vulkan, GL/GLES, compliance, clocks, subsystems, services.
 - check, snapshot, diff and report for agents; Textual dashboard.
