@@ -453,6 +453,62 @@ def cmd_check(args, m):
     return res["exit"]
 
 
+def cmd_ane(args, m):
+    from . import ane
+    from .probe import timed
+    res, err = timed(ane.collect, 8)
+    if err:
+        res = {"schema": "aurora-diag/ane", "version": 1, "error": err}
+    else:
+        res["checks"] = ane.checks(res)
+    report(args, res)
+    return 2 if err else 0
+
+
+def cmd_compare(args, m):
+    from . import ane, clocks, comparison
+    from .probe import timed
+    res, err = timed(lambda: comparison.build(m.as_dict(), sources.collect(["hwmon"]),
+                                              clocks.all_clocks(), ane.collect()), 15)
+    if err:
+        res = {"schema": comparison.SCHEMA, "version": 1, "error": err, "rows": []}
+    report(args, res)
+    return 2 if res.get("error") else 0
+
+
+def cmd_show(args, m):
+    """One category (or all) as the dashboard's drill-down shows it."""
+    from . import sections
+    names = sections.ORDER if args.name in (None, "all") else [sections.resolve(args.name)]
+    if "cpu" in names:
+        sections.cpu()   # first sample: the second one gives live per-core load
+        time.sleep(args.interval)
+    secs = sections.collect(names)
+    log.event("show", categories=names, levels={n: s["level"] for n, s in secs.items()})
+    if args.json:
+        print(json.dumps(secs[names[0]] if len(names) == 1 else {"schema": "aurora-diag/show", "version": 1,
+                                                               "host": os.uname().nodename, "kernel": os.uname().release,
+                                                               "sections": secs}, default=str))
+    else:
+        for n in names:
+            sys.stdout.write(sections.render(secs[n]) + "\n")
+
+
+def cmd_coverage(args, m):
+    """Every category item, present or absent with the reason."""
+    from . import sections
+    secs = sections.collect([n for n in sections.ORDER if n != "health"])
+    rows = sections.coverage(secs)
+    log.event("coverage", items=len(rows), absent=sum(1 for r in rows if r["level"] == "absent"))
+    if args.json:
+        print(json.dumps({"schema": "aurora-diag/coverage", "version": 1, "host": os.uname().nodename,
+                          "kernel": os.uname().release, "items": rows}, default=str))
+        return
+    w = max(len(r["item"]) for r in rows) if rows else 10
+    for r in rows:
+        print("%-8s %-9s %-*s %s" % (r["level"].upper(), r["section"], min(w, 26), r["item"][:26], r["detail"]))
+
+
 def cmd_snapshot(args, m):
     from . import snapshot
     snap = snapshot.build(m, api=not args.no_api)
@@ -490,29 +546,6 @@ def cmd_diff(args, m):
 def cmd_clocks(args, m):
     from . import clocks
     report(args, clocks.all_clocks())
-
-
-def cmd_ane(args, m):
-    from . import ane
-    from .probe import timed
-    res, err = timed(ane.collect, 8)
-    if err:
-        res = {"schema": "aurora-diag/ane", "version": 1, "error": err}
-    else:
-        res["checks"] = ane.checks(res)
-    report(args, res)
-    return 2 if err else 0
-
-
-def cmd_compare(args, m):
-    from . import ane, clocks, comparison
-    from .probe import timed
-    res, err = timed(lambda: comparison.build(m.as_dict(), sources.collect(["hwmon"]),
-                                              clocks.all_clocks(), ane.collect()), 15)
-    if err:
-        res = {"schema": comparison.SCHEMA, "version": 1, "error": err, "rows": []}
-    report(args, res)
-    return 2 if res.get("error") else 0
 
 
 def cmd_subsys(args, m):
@@ -678,17 +711,23 @@ def parser():
     x.add_argument("new")
     x.add_argument("--quiet", "-q", action="store_true", help="only regressions")
     sub.add_parser("clocks", help="CPU policies, DT DVFS ladders, devfreq, memory")
-    sub.add_parser("ane", help="ANE devices, firmware, clients, power, health and saved benchmark")
-    sub.add_parser("compare", help="passive Linux readings vs the J616s macOS baseline")
     x = sub.add_parser("subsys", help="every hardware block: DT, driver, firmware, devices, last error")
     x.add_argument("--all", action="store_true", help="include infrastructure nodes (DARTs, mailboxes, ...)")
     sub.add_parser("services", help="userspace services, Touch ID state, speaker protection")
+    sub.add_parser("ane", help="ANE devices, firmware, clients, power, health and saved benchmark")
+    sub.add_parser("compare", help="passive Linux readings vs the J616s macOS baseline")
+    x = sub.add_parser("show", help="one category as the dashboard's drill-down shows it: " + ", ".join(
+        ["health", "thermal", "cpu", "gpu", "memory", "display", "radio", "storage", "power", "audio", "engines", "sensors", "system", "all"]))
+    x.add_argument("name", nargs="?", default="all")
+    x.add_argument("--interval", type=float, default=0.5, help="CPU sampling interval for per-core load (default 0.5 s)")
+    sub.add_parser("coverage", help="every category item: present, or absent with the reason")
     x = sub.add_parser("screenshot", help="render dashboard tabs of a capture to SVG (and PNG with --png)")
     x.add_argument("snapshot", help="a capture from `tui --dump FILE`")
     x.add_argument("-o", "--output", default=".", help="directory (default .)")
     x.add_argument("--prefix", help="file name prefix (default: the capture's host)")
     x.add_argument("--host", help="show this name instead of the capture's hostname")
-    x.add_argument("--tab", help="comma list: " + "overview,sensors,clocks,fans,gpu,ane,compare,subsys,services,log")
+    x.add_argument("--tab", help="comma list of tabs (overview,sensors,clocks,fans,gpu,ane,compare,subsys,services,coverage,log) "
+                   "and drill-downs (show-cpu, show-health, show-audio, ...)")
     x.add_argument("--light", action="store_true", help="light theme")
     x.add_argument("--png", action="store_true", help="also write PNGs (rsvg-convert, cairosvg, or qlmanage+sips on macOS)")
     x = sub.add_parser("tui", help="interactive dashboard for humans")
@@ -702,14 +741,14 @@ def parser():
 COMMANDS = {
     "machine": cmd_machine, "sensors": cmd_sensors, "list": cmd_sensors, "log": cmd_log,
     "report": cmd_report, "gpu": cmd_gpu, "ane": cmd_ane, "compare": cmd_compare, "check": cmd_check, "snapshot": cmd_snapshot,
-    "diff": cmd_diff, "screenshot": cmd_screenshot, "clocks": cmd_clocks, "subsys": cmd_subsys, "services": cmd_services, "summary": cmd_summary, "get": cmd_get,
+    "diff": cmd_diff, "screenshot": cmd_screenshot, "show": cmd_show, "coverage": cmd_coverage, "clocks": cmd_clocks, "subsys": cmd_subsys, "services": cmd_services, "summary": cmd_summary, "get": cmd_get,
     "set": cmd_set, "watch": cmd_watch, "fan": cmd_fan, "fan-guard": cmd_fan_guard,
     "haptic": cmd_haptic, "display": cmd_display, "kbd": cmd_kbd, "audio": cmd_audio,
     "journal": cmd_journal, "restore": cmd_restore, "tui": cmd_tui, "log-path": cmd_log_path,
 }
 
 
-DOCUMENT_COMMANDS = ("check", "snapshot", "diff", "report", "gpu", "ane", "compare", "clocks", "services")
+DOCUMENT_COMMANDS = ("check", "snapshot", "diff", "report", "gpu", "ane", "compare", "clocks", "services", "show", "coverage")
 GLOBAL_FLAGS = ("--json", "--allow-unknown", "--dry-run")
 
 

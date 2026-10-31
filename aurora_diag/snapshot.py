@@ -122,6 +122,10 @@ def build(machine, api=True, budget=None):
             snap["gpu"]["compliance"] = compliance.summary(vk, gl)
         except Exception as e:  # compliance is advisory
             errors["compliance"] = repr(e)
+    from . import sections
+    secs = probe("inventory", lambda: sections.collect([n for n in sections.ORDER if n != "health"], subs=subs), {}, 40)
+    snap["inventory"] = sections.facts(secs)
+    snap["inventory_items"] = {"%s/%s" % (r["section"], r["item"]): r["level"] for r in sections.coverage(secs)}
     snap["probe_errors"] = errors
     snap["elapsed_s"] = round(time.monotonic() - t0, 2)
     return snap
@@ -243,12 +247,39 @@ def diff(a, b):
                 if k == "path" and y.get(k) != "native":
                     sev = "regression"
                 _change(out, sev, "gl", "%s %s" % (api, k), x.get(k), y.get(k))
+    ia, ib = a.get("inventory_items") or {}, b.get("inventory_items") or {}
+    if ia and ib:
+        for k in sorted(set(ia) | set(ib)):
+            x, y = ia.get(k), ib.get(k)
+            if x == y:
+                continue
+            good = ("ok",)
+            sev = "regression" if x in good and y not in good else ("improvement" if y in good and x not in good else "change")
+            _change(out, sev, "inventory", k, x, y)
+    fa, fb = _flat(a.get("inventory") or {}), _flat(b.get("inventory") or {})
+    if fa and fb:
+        for k in sorted(set(fa) | set(fb)):
+            if fa.get(k) != fb.get(k):
+                x, y = fa.get(k), fb.get(k)
+                sev = "regression" if (x and not y and re.search(r"(driver|bound|firmware|model)", k)) else "change"
+                _change(out, sev, "inventory", k, x, y)
     cpa, cpb = (ga.get("compliance") or {}), (gb.get("compliance") or {})
     for k in sorted(set(cpa) | set(cpb)):
         x, y = cpa.get(k) or {}, cpb.get(k) or {}
         if x.get("missing") != y.get("missing"):
             more = len(y.get("missing") or []) > len(x.get("missing") or [])
             _change(out, "regression" if more else "improvement", "compliance", k, x.get("missing"), y.get("missing"))
+    return out
+
+
+def _flat(d, pre=""):
+    out = {}
+    for k, v in d.items():
+        key = "%s.%s" % (pre, k) if pre else str(k)
+        if isinstance(v, dict) and v:
+            out.update(_flat(v, key))
+        else:
+            out[key] = json.dumps(v, sort_keys=True, default=str) if isinstance(v, (list, dict)) else v
     return out
 
 

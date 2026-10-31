@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
-from aurora_diag import check, clocks, compliance, gpu, snapshot, subsystems, sysfs  # noqa: E402
+from aurora_diag import check, clocks, compliance, gpu, snapshot, subsystems  # noqa: E402
 from aurora_diag.machine import Machine  # noqa: E402
 from test_aurora_diag import Base, build, w  # noqa: E402
 
