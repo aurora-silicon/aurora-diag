@@ -176,6 +176,13 @@ class TestANEStatus(AneBase):
         self.assertFalse(data["devices"][0]["driver_bound"])
         self.assertIn("bound to other", " ".join(c["reason"] for c in ane.checks(data)))
 
+    def test_permission_group_missing_from_group_database(self):
+        accelerator(self.root)
+        path = "/dev/accel/accel0"
+        gid = os.stat(sysfs.root(path)).st_gid
+        with patch.object(ane.grp, "getgrgid", side_effect=KeyError(gid)):
+            self.assertIn("numeric GID %d" % gid, ane._permission(path))
+
 
 if __name__ == "__main__":
     unittest.main()

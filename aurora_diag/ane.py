@@ -24,9 +24,14 @@ SOC_GENERATIONS = {
 
 def _permission(path):
     try:
-        group = grp.getgrgid(os.stat(sysfs.root(path)).st_gid).gr_name
-    except (OSError, KeyError):
+        gid = os.stat(sysfs.root(path)).st_gid
+    except OSError:
         group = "accel" if path.startswith("/dev/accel/") else "root"
+    else:
+        try:
+            group = grp.getgrgid(gid).gr_name
+        except KeyError:
+            group = "numeric GID %d" % gid
     return "Permission denied for %s; request access through the %s group or its ACL from the administrator." % (path, group)
 
 
@@ -399,7 +404,7 @@ def checks(data):
             level = "pass"
         reason = "wedged %s; power %s; error counters %s (cumulative)" % (d["wedged"], d["power_state"], d["error_counters"] or "unavailable")
         if d["wedged"]:
-            reason = "ANE is wedged; ask the administrator to use the driver's bounded sysfs reset or reboot if recovery fails."
+            reason = "ANE is wedged; ask the administrator to request bounded recovery through %s/reset or reboot if recovery fails." % d["path"]
         elif d["power_state"] == "error":
             reason = "ANE runtime PM is in error; inspect the kernel power-domain errors and reboot after fixing the matching kernel/DT."
         elif level == "fail":

@@ -149,12 +149,12 @@ The baseline export (`aurora_diag/macos_baseline.json`, installed with the modul
 `ane.dt_nodes` inventories Apple ANE nodes in `/sys/firmware/devicetree/base`
 (or `/proc/device-tree`) and platform `of_node` links, deduplicated by resolved
 DT path. Entries contain `path`, `compatible`, `generation`, `status`, `driver`,
-`platform_device`, `accelerators` and `issues`. Disabled/unbound nodes appear
+`platform_device`, `driver_bound`, `accelerators` and `issues`. Disabled/unbound nodes appear
 even without `/sys/class/accel`. Missing status means `okay`; denied status is
 null and carries an issue. T8140 is H17. Unknown compatibles stay unknown.
 Top-level `issues` reports tree enumeration errors.
 
-Each accelerator adds `dt_node`, `dt_status`, `memory_vote`,
+Each accelerator adds `driver_bound`, `dt_node`, `dt_status`, `memory_vote`,
 `performance_error` and `issues`. `performance_level` (0–5 or `unsupported`),
 `memory_vote` (average and peak decimal kB/s or `unsupported`) and
 `performance_error` (zero or negative errno) retain the kernel text. They are
@@ -165,3 +165,5 @@ actionable issue. Negative performance errors fail health. Busy time is
 Missing counters remain absent, never synthesized as zero. All probes are
 read-only; device access is inspected with metadata/access checks without
 opening `/dev/accel/*`. No group changes, reset or firmware fetch is performed.
+Denied-read diagnostics name the owning group, or its numeric GID if the group
+database has no entry; the suggested reset path is guidance only and is never written.
