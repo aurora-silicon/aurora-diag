@@ -38,6 +38,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %doc %{_docdir}/aurora-diag
 %{_bindir}/aurora-diag
 %{_datadir}/aurora-diag
+%{_datadir}/applications/org.aurorasilicon.Diag.desktop
 
 %changelog
 * Fri Oct 30 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.2.0-1

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Aurora Diag
+GenericName=Hardware diagnostics
+Comment=Sensors, clocks, fans, GPU, subsystems and services on Apple silicon
+Exec=aurora-diag tui
+Terminal=true
+Icon=utilities-system-monitor
+Categories=System;Monitor;
+Keywords=diagnostics;sensors;fans;gpu;vulkan;hardware;
