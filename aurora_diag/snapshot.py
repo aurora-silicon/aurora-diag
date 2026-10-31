@@ -126,6 +126,10 @@ def build(machine, api=True, budget=None):
     secs = probe("inventory", lambda: sections.collect([n for n in sections.ORDER if n != "health"], subs=subs), {}, 40)
     snap["inventory"] = sections.facts(secs)
     snap["inventory_items"] = {"%s/%s" % (r["section"], r["item"]): r["level"] for r in sections.coverage(secs)}
+    # Warnings this boot already has: check --expect treats them as known gaps.
+    from . import check
+    ck = probe("check", lambda: check.run(machine, api=False, secs=secs), None, 30)
+    snap["warnings"] = sorted("%s/%s" % (r["group"], r["name"]) for r in (ck or {}).get("checks", []) if r["level"] == "warn")
     snap["probe_errors"] = errors
     snap["elapsed_s"] = round(time.monotonic() - t0, 2)
     return snap

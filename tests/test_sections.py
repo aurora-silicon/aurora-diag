@@ -239,3 +239,21 @@ class TestSections(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestKnownWarnings(Base):
+    def test_baseline_warning_passes(self):
+        build(self.root)
+        import tempfile
+        from aurora_diag.machine import Machine
+        res = check.run(Machine(), api=False, secs={})
+        warns = ["%s/%s" % (r["group"], r["name"]) for r in res["checks"] if r["level"] == "warn"]
+        base = {"schema": snapshot.SCHEMA, "version": 1, "subsystems": {}, "services": {}, "sensors": [],
+                "warnings": warns, "dmesg_readable": False}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(base, f)
+        res2 = check.run(Machine(), api=False, secs={}, expect=f.name)
+        os.unlink(f.name)
+        known = [r for r in res2["checks"] if r["reason"].startswith("known in the baseline")]
+        self.assertEqual(len(known), len([w for w in warns if not w.startswith("sensors/")]) or len(known))
+        self.assertFalse(any(r["level"] == "warn" and "%s/%s" % (r["group"], r["name"]) in warns for r in res2["checks"]))

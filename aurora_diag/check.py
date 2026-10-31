@@ -203,6 +203,12 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
             secs = {}
     out.extend(inventory_rows(secs, base))
 
+    if base and base.get("warnings") is not None:
+        known = set(base["warnings"])
+        for r in out:
+            if r["level"] == "warn" and "%s/%s" % (r["group"], r["name"]) in known:
+                r["level"], r["reason"] = "pass", "known in the baseline: " + r["reason"]
+
     if only:
         want = [w.strip().lower() for w in only.split(",") if w.strip()]
         # Category rows match by their group or category name (--only display, --only radio).

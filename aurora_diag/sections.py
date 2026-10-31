@@ -777,7 +777,10 @@ def motion():
                                                    "scale": scale, "sampling_frequency": sysfs.read(d + "/sampling_frequency"),
                                                    "label": sysfs.read(d + "/label"),
                                                    "mount_matrix": sysfs.read(d + "/in_mount_matrix") or sysfs.read(d + "/mount_matrix")})
-    nodes = _dt_nodes(r"^(accel|gyro|imu|motion|magnetometer|compass)$|aop-motion|accel|gyro")
+    # Motion sensor nodes: named accel/gyro/... or with a motion compatible.
+    # Not the trackpad's tp_accel interface, which is a haptics channel.
+    nodes = _dt_nodes(r"^(accel|accel-base|gyro|accelerometer|gyroscope|imu|magnetometer|compass)$|"
+                      r",[\w-]*(aop-(motion|accel|gyro)|accelerometer|gyroscope|imu)\b")
     aops = [n for n in sysfs.listdir(DT) if n.startswith("aop@")] + [n for n in _dt_nodes(r"^aop$") if "/" in n]
     drivers = kernel_knows(r"apple,.*(motion|accel|gyro)")
     res = []
@@ -1477,6 +1480,18 @@ def engines(subs=None):
         if key == "ane":
             acc = [a for a in sysfs.listdir("/sys/class/accel")]
             rows.append(["/dev/accel", ", ".join(acc) or "none"])
+            try:
+                from . import ane
+                for d in ane.collect().get("devices", []):
+                    for k in ("generation", "firmware_version", "performance_level", "power_state", "wedged", "client_count"):
+                        if d.get(k) is not None:
+                            rows.append(["%s %s" % (d.get("node"), k), d[k]])
+                    for k, v in sorted((d.get("counters") or {}).items()):
+                        rows.append(["%s counter %s" % (d.get("node"), k), v])
+                    for k, v in sorted((d.get("error_counters") or {}).items()):
+                        rows.append(["%s recovery/error %s" % (d.get("node"), k), v])
+            except Exception as e:
+                rows.append(["ane probe", repr(e)])
         if key in ("ave", "avd", "isp"):
             v4 = []
             for v in sysfs.listdir("/sys/class/video4linux"):
