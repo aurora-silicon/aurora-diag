@@ -55,6 +55,30 @@ Every document an agent parses carries `schema` and `version`. A reader should c
 
 Values that move by themselves (temperatures, power, frequencies right now) are not in a snapshot, so two snapshots of an unchanged machine diff clean.
 
+Since 0.3.0 a snapshot also carries:
+
+    "inventory": {"<category>": {stable facts: drivers, firmware versions, connectors and their KMS properties,
+                                 the internal panel's EDID name and refresh, DCP nodes, IIO channels, ...}},
+    "inventory_items": {"<category>/<item>": "ok" | "warn" | "fail" | "absent" | "off"},
+    "warnings": ["<group>/<check name>", ...]     (warn rows of a check run at snapshot time)
+
+`check --expect` fails an item that was `ok` and is now `absent` or `fail`, and passes a warning listed in `warnings`.
+
+## category (`aurora-diag show NAME --json`)
+
+    {"name": "cpu", "title": "CPU", "level": "ok" | "warn" | "fail" | "off",
+     "headline": "two short lines", "spark": number | null,
+     "items": [{"key": "accelerometer", "level": "ok" | "warn" | "fail" | "absent" | "off", "detail": "why", ...}],
+     "tables": [{"title", "columns": [...], "rows": [[...], ...]}],
+     "facts": {...}}
+
+`show all --json` wraps them: `{"schema": "aurora-diag/show", "version": 1, "host", "kernel", "sections": {"<name>": {...}}}`. Names: health, thermal, cpu, gpu, memory, display, radio, storage, power, audio, engines, sensors, system (aliases such as `speaker`, `wifi`, `nvme`, `motion` work too).
+
+## coverage (`aurora-diag coverage --json`)
+
+    {"schema": "aurora-diag/coverage", "version": 1, "host", "kernel",
+     "items": [{"section", "item", "level", "detail"}]}
+
 ## diff (`aurora-diag diff --json`)
 
     {"schema": "aurora-diag/diff", "version": 1, "old", "new", "old_kernel", "new_kernel",
@@ -142,4 +166,4 @@ The baseline export (`aurora_diag/macos_baseline.json`, installed with the modul
 
 ## dashboard (`tui --dump FILE`)
 
-`schema: "aurora-diag/dashboard"`, `version: 1` adds `slow.ane` and `slow.comparison` with the structures above (or an `error` from a timed-out probe). Both are refreshed every 15 seconds. The Textual ANE and vs macOS panels render these captured values without probing the viewing machine. Older captures may omit both fields. Table cells and trailing rows update in place, preserving scroll offset and cursor where the remaining content permits.
+`schema: "aurora-diag/dashboard"`, `version: 1` carries `sections` (every category, as `show --json` prints it) and `history[].values["section.<name>"]` for the tiles' sparklines. It adds `slow.ane` and `slow.comparison` with the structures above (or an `error` from a timed-out probe). Both are refreshed every 15 seconds. The Textual ANE and vs macOS panels render these captured values without probing the viewing machine. Older captures may omit both fields. Table cells and trailing rows update in place, preserving scroll offset and cursor where the remaining content permits.
