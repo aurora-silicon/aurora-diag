@@ -42,7 +42,7 @@ Every document an agent parses carries `schema` and `version`. A reader should c
       "sensors": ["hwmon/<name>/<label>", "iio/<name>/<channel>", "thermal/<type>", ...],
       "dmesg_errors": ["normalised -p 3 lines (numbers -> N, hex -> 0x?)"],
       "dmesg_readable": true,
-      "gpu": {"devices": {"asahi": {"driver", "nodes", "kernel_driver"}},
+      "gpu": {"devices": {"aurora": {"driver", "nodes", "kernel_driver"}},
               "vulkan": {"instance", "devices": {"<name>": {"apiVersion", "driverVersion", "driverID", "driverName",
                          "driverInfo", "conformanceVersion", "extension_count", "features_enabled",
                          "features_total", "format_count"}}},

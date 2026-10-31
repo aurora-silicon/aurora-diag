@@ -91,6 +91,8 @@ def build(root, compat=b"apple,j316s\0apple,t6000\0apple,arm-platform\0", fans_p
     w(root, "/sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq", "1704000\n", 0o444)
     w(root, "/sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq", "2064000\n")
     w(root, "/sys/kernel/debug/apple-pmc/x/status", "static agents: 0xb\n", 0o444)
+    w(root, "/sys/kernel/debug/aurora-g17/capacity", "pool 0\n", 0o444)
+    w(root, "/sys/kernel/debug/asahi-g16/stats", "jobs 0\n", 0o444)
     w(root, "/sys/kernel/debug/tracing/trace_pipe", "never read\n", 0o444)
     w(root, "/run/speakerguardd/state",
       "speakerguardd-state 2\nboottime_ns 9\ncovered_ns 9\narmed 1\nreleased 0\n"
@@ -138,6 +140,8 @@ class TestRead(Base):
         self.assertNotIn("psy.macsmc-battery.serial_number", ids)
         self.assertEqual(ids["leds.kbd_backlight.trigger"]["value"], "none")
         self.assertIn("debugfs.apple-pmc/x/status", ids)
+        self.assertIn("debugfs.aurora-g17/capacity", ids)
+        self.assertIn("debugfs.asahi-g16/stats", ids)
         self.assertFalse(any("tracing" in i for i in ids))
 
     def test_speakerguardd_state(self):
