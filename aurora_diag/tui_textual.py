@@ -19,6 +19,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
+from textual.coordinate import Coordinate
 from textual.widgets import (DataTable, Footer, Header, Input, Label, RichLog, Sparkline, Static,
                              TabbedContent, TabPane)
 
@@ -323,14 +324,30 @@ class Dash(App):
                       level="ok" if (c.get("path") or e.get("path")) == "native" else "warn")
 
     def _fill(self, tid, rows):
+        """Refresh a table without moving the view.
+
+        Same shape: update only the cells that changed, so scroll position and cursor stay put.
+        New shape: rebuild, then restore the scroll offset and the cursor without scrolling to it.
+        """
         rows = [tuple(CTRL.sub("", c) if isinstance(c, str) else c for c in r) for r in rows]
         t = self.query_one("#" + tid, DataTable)
-        row = t.cursor_row
+        if rows and t.row_count == len(rows) and len(t.columns) == len(rows[0]):
+            for y, r in enumerate(rows):
+                for x, v in enumerate(r):
+                    c = Coordinate(y, x)
+                    if t.get_cell_at(c) != v:
+                        t.update_cell_at(c, v)
+            return
+        sx, sy, row = t.scroll_x, t.scroll_y, t.cursor_row
         t.clear()
         for r in rows:
             t.add_row(*r)
         if rows:
-            t.move_cursor(row=min(row, len(rows) - 1))
+            try:
+                t.move_cursor(row=min(row, len(rows) - 1), scroll=False)
+            except TypeError:   # older Textual without the scroll argument
+                t.move_cursor(row=min(row, len(rows) - 1))
+        t.scroll_to(sx, sy, animate=False)
 
     def sensor_rows(self):
         cats = ("temp", "power", "iio", "thermal", "cooling", "battery", "fan", "speaker", "gpu", "backlight", "leds")
@@ -453,6 +470,8 @@ class Dash(App):
 
     def render_log(self):
         lg = self.query_one("#t-log", RichLog)
+        # Follow new lines only while the reader is already at the bottom.
+        lg.auto_scroll = getattr(lg, "is_vertical_scroll_end", True) or lg.max_scroll_y == 0
         lines = self.data.get("log") or []
         n = getattr(self, "_log_n", 0)
         if len(lines) < n:
