@@ -16,6 +16,7 @@ as a failed probe instead of a stalled run.
 import json
 import os
 import re
+from collections import Counter
 import sys
 import time
 
@@ -57,12 +58,20 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
                 lvl = "pass"  # no driver for it in the baseline either: known gap
                 why = "no driver (same as baseline)"
             if b:
-                lost = sorted(set(b.get("class_devices", [])) - set(s.get("class_devices") or []))
-                strip = lambda l: sorted(re.sub(r"\d+$", "", c) for c in l)
-                gained = sorted(set(s.get("class_devices") or []) - set(b.get("class_devices", [])))
-                if lost and strip(lost) != strip(gained):
+                # Kernel numbering (i2c-2 vs i2c-1, card0 vs card1, input7 vs input9) changes
+                # between boots and kernels. A device only counts as lost when fewer of its
+                # kind (name without the trailing number) exist now than in the baseline.
+                # Devices that exist only while something is plugged in (a Type-C partner,
+                # cable or plug) follow the desk, not the kernel, so they are not compared.
+                plugged = re.compile(r"^typec/port\d+-(partner|cable|plug\d*)$")
+                kind = lambda c: re.sub(r"\d+", "N", c)
+                short = Counter(kind(c) for c in b.get("class_devices", []) if not plugged.match(c)) - \
+                    Counter(kind(c) for c in s.get("class_devices") or [] if not plugged.match(c))
+                if short:
+                    lost = sorted(c for c in set(b.get("class_devices", [])) - set(s.get("class_devices") or [])
+                                  if kind(c) in short)
                     lvl = "fail"
-                    why = "lost %s; %s" % (", ".join(lost), why)
+                    why = "lost %s; %s" % (", ".join(lost or sorted(short)), why)
         out.append(_r("subsys", "%s %s" % (s.get("title") or s["block"], s["name"]), lvl, why, node=s["node"],
                       infra=s["kind"] != "block"))
     if base:
