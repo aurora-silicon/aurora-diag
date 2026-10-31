@@ -14,7 +14,8 @@ import socket
 import subprocess
 import time
 
-from . import __version__, audio, clocks, compliance, fans, gpu, haptics, sources, sysfs
+from . import __version__, ane, audio, clocks, compliance, fans, gpu, haptics, sources, sysfs
+from .probe import timed
 
 
 def _dmesg():
@@ -73,6 +74,8 @@ def build(machine, summary_fn):
         "drivers": {r["dev"]: r["label"] for r in fast if r["cat"] == "driver"},
         "dmesg": _dmesg(),
     }
+    an, err = timed(ane.collect, 8)
+    rep["ane"] = an if err is None else {"error": err}
     rep["compliance"] = compliance.summary(rep["vulkan"], rep["gl"])
     for d in rep["vulkan"].get("devices", []):
         d.pop("feature_values", None)
@@ -101,6 +104,19 @@ def text(rep):
     _w(L, "cmdline", k["cmdline"])
     _w(L, "tainted", k["tainted"])
     _w(L, "os", k["os_release"].get("PRETTY_NAME"))
+    L.append("ANE")
+    an = rep.get("ane") or {}
+    if an.get("error"):
+        _w(L, "probe", an["error"])
+    elif not an.get("devices"):
+        _w(L, "devices", "no ANE accelerator device exposed")
+    for d in an.get("devices", []):
+        _w(L, d["node"], "%s, %s" % (d["driver"], d["generation"] or "unknown"))
+        for key in ("firmware_version", "firmware_source", "client_count", "clients_complete", "performance_level",
+                    "power_state", "wedged", "error_counters", "counters", "last_benchmark"):
+            _w(L, key, d[key], 4)
+    if an.get("benchmark_error"):
+        _w(L, "last benchmark", an["benchmark_error"])
     L.append("GPU (kernel)")
     for g in rep["gpu"]["devices"]:
         kd = g.get("kernel_driver") or {}

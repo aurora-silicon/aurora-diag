@@ -604,6 +604,11 @@ def _clock():
     return clocks.readings()
 
 
+def _ane():
+    from . import ane
+    return ane.readings()
+
+
 def _subsys():
     from . import subsystems
     return subsystems.readings()
@@ -625,7 +630,7 @@ SOURCES = {
     "typec": typec, "usb": usb, "input": input_devices, "radio": radios,
     "v4l2": video, "regulator": regulators, "remoteproc": remoteproc,
     "driver": drivers, "modparam": modparams, "sep": sep, "haptic": haptic,
-    "gpu": _gpu, "clock": _clock, "subsys": _subsys, "service": _service,
+    "gpu": _gpu, "ane": _ane, "clock": _clock, "subsys": _subsys, "service": _service,
     "api": _api, "debugfs": debugfs,
 }
 # Sources only asked for by name: the GPU without the per-process walk,

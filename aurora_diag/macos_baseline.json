@@ -1,0 +1,26 @@
+{
+  "schema": "aurora-diag/macos-baseline",
+  "version": 1,
+  "machine": "apple,j616s",
+  "source": "j616s-perf-baseline-20261031/COMPARE.md",
+  "captured": "2026-10-31",
+  "os": "macOS 27.0 (26A428)",
+  "metrics": [
+    {"id": "cpu.p.states", "label": "P DVFS states", "value": 19, "unit": "states", "context": "cpu.dvfs; advertised ladder"},
+    {"id": "cpu.p.min", "label": "P minimum clock", "value": 1260, "unit": "MHz", "context": "cpu.dvfs; advertised ladder"},
+    {"id": "cpu.p.max", "label": "P maximum clock", "value": 4512, "unit": "MHz", "context": "cpu.dvfs; advertised ladder, not achieved clock"},
+    {"id": "cpu.e.states", "label": "E DVFS states", "value": 7, "unit": "states", "context": "cpu.dvfs; advertised ladder"},
+    {"id": "cpu.e.min", "label": "E minimum clock", "value": 1020, "unit": "MHz", "context": "cpu.dvfs; advertised ladder"},
+    {"id": "cpu.e.max", "label": "E maximum clock", "value": 2592, "unit": "MHz", "context": "cpu.dvfs; advertised ladder, not achieved clock"},
+    {"id": "idle.pstr", "label": "System power", "value": 14.63, "unit": "W", "context": "idle mean on AC; three displays, internal ~382 nits"},
+    {"id": "idle.phpc", "label": "CPU-side heatpipe power", "value": 2.61, "unit": "W", "context": "idle.phpc; idle on AC"},
+    {"id": "idle.pmvc", "label": "PMVC rail", "value": 6.19, "unit": "W", "context": "idle.other; idle on AC"},
+    {"id": "idle.pzc0", "label": "PZC0 rail", "value": 1.48, "unit": "W", "context": "idle.other; idle on AC"},
+    {"id": "idle.non_display", "label": "System minus display rail", "value": 7.18, "unit": "W", "context": "idle.pstr; PSTR minus PDBR, idle on AC"},
+    {"id": "idle.tcmz", "label": "CPU die maximum temperature", "value": 48.9, "unit": "C", "context": "idle.tcmz; idle on AC"},
+    {"id": "ane.b1.rate", "label": "ANE MobileNet batch 1 throughput", "value": 3309, "unit": "inf/s", "context": "MobileNetV1 alpha 1.0, 224x224, FP16 random weights, CPUAndNeuralEngine, 8 s"},
+    {"id": "ane.b1.p50", "label": "ANE MobileNet batch 1 latency p50", "value": 0.302, "unit": "ms", "context": "same model and method as batch 1 throughput"},
+    {"id": "ane.b8.rate", "label": "ANE MobileNet batch 8 throughput", "value": 3788, "unit": "img/s", "context": "same model, batch 8, 8 s; images per second"},
+    {"id": "ane.b8.p50", "label": "ANE MobileNet batch 8 latency p50", "value": 2.108, "unit": "ms", "context": "same model, batch 8; milliseconds per batch"}
+  ]
+}

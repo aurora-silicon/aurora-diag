@@ -492,6 +492,29 @@ def cmd_clocks(args, m):
     report(args, clocks.all_clocks())
 
 
+def cmd_ane(args, m):
+    from . import ane
+    from .probe import timed
+    res, err = timed(ane.collect, 8)
+    if err:
+        res = {"schema": "aurora-diag/ane", "version": 1, "error": err}
+    else:
+        res["checks"] = ane.checks(res)
+    report(args, res)
+    return 2 if err else 0
+
+
+def cmd_compare(args, m):
+    from . import ane, clocks, comparison
+    from .probe import timed
+    res, err = timed(lambda: comparison.build(m.as_dict(), sources.collect(["hwmon"]),
+                                              clocks.all_clocks(), ane.collect()), 15)
+    if err:
+        res = {"schema": comparison.SCHEMA, "version": 1, "error": err, "rows": []}
+    report(args, res)
+    return 2 if res.get("error") else 0
+
+
 def cmd_subsys(args, m):
     from . import subsystems
     subs = subsystems.subsystems()
@@ -655,6 +678,8 @@ def parser():
     x.add_argument("new")
     x.add_argument("--quiet", "-q", action="store_true", help="only regressions")
     sub.add_parser("clocks", help="CPU policies, DT DVFS ladders, devfreq, memory")
+    sub.add_parser("ane", help="ANE devices, firmware, clients, power, health and saved benchmark")
+    sub.add_parser("compare", help="passive Linux readings vs the J616s macOS baseline")
     x = sub.add_parser("subsys", help="every hardware block: DT, driver, firmware, devices, last error")
     x.add_argument("--all", action="store_true", help="include infrastructure nodes (DARTs, mailboxes, ...)")
     sub.add_parser("services", help="userspace services, Touch ID state, speaker protection")
@@ -663,7 +688,7 @@ def parser():
     x.add_argument("-o", "--output", default=".", help="directory (default .)")
     x.add_argument("--prefix", help="file name prefix (default: the capture's host)")
     x.add_argument("--host", help="show this name instead of the capture's hostname")
-    x.add_argument("--tab", help="comma list: " + "overview,sensors,clocks,fans,gpu,subsys,services,log")
+    x.add_argument("--tab", help="comma list: " + "overview,sensors,clocks,fans,gpu,ane,compare,subsys,services,log")
     x.add_argument("--light", action="store_true", help="light theme")
     x.add_argument("--png", action="store_true", help="also write PNGs (rsvg-convert, cairosvg, or qlmanage+sips on macOS)")
     x = sub.add_parser("tui", help="interactive dashboard for humans")
@@ -676,7 +701,7 @@ def parser():
 
 COMMANDS = {
     "machine": cmd_machine, "sensors": cmd_sensors, "list": cmd_sensors, "log": cmd_log,
-    "report": cmd_report, "gpu": cmd_gpu, "check": cmd_check, "snapshot": cmd_snapshot,
+    "report": cmd_report, "gpu": cmd_gpu, "ane": cmd_ane, "compare": cmd_compare, "check": cmd_check, "snapshot": cmd_snapshot,
     "diff": cmd_diff, "screenshot": cmd_screenshot, "clocks": cmd_clocks, "subsys": cmd_subsys, "services": cmd_services, "summary": cmd_summary, "get": cmd_get,
     "set": cmd_set, "watch": cmd_watch, "fan": cmd_fan, "fan-guard": cmd_fan_guard,
     "haptic": cmd_haptic, "display": cmd_display, "kbd": cmd_kbd, "audio": cmd_audio,
@@ -684,7 +709,7 @@ COMMANDS = {
 }
 
 
-DOCUMENT_COMMANDS = ("check", "snapshot", "diff", "report", "gpu", "clocks", "services")
+DOCUMENT_COMMANDS = ("check", "snapshot", "diff", "report", "gpu", "ane", "compare", "clocks", "services")
 GLOBAL_FLAGS = ("--json", "--allow-unknown", "--dry-run")
 
 

@@ -20,7 +20,7 @@ from collections import Counter
 import sys
 import time
 
-from . import gpu, services, snapshot, subsystems, sysfs
+from . import ane, gpu, services, snapshot, subsystems, sysfs
 from .probe import timed
 
 SCHEMA = "aurora-diag/check"
@@ -184,6 +184,18 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
                     if b.get("extension_count") and info["extension_count"] < b["extension_count"]:
                         lvl, why = "fail", "extensions dropped from %d: %s" % (b["extension_count"], why)
                 out.append(_r("gpu", apiname, lvl, why))
+
+    an, err = timed(ane.collect, timeout)
+    if err:
+        out.append(_r("ane", "probe", "fail", "ANE probe " + err))
+    else:
+        out.extend(ane.checks(an))
+        if base:
+            current = {d["platform_device"]: d for d in an["devices"]}
+            for name, was in base.get("ane", {}).items():
+                now = current.get(name)
+                if was.get("driver") and (not now or not now.get("driver")):
+                    out.append(_r("ane", name, "fail", "ANE device/driver present in baseline is missing"))
 
     if only:
         want = [w.strip().lower() for w in only.split(",") if w.strip()]

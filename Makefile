@@ -12,6 +12,7 @@ check:
 install:
 	install -d $(SHARE)/aurora_diag
 	install -m644 aurora_diag/*.py $(SHARE)/aurora_diag/
+	install -m644 aurora_diag/macos_baseline.json $(SHARE)/aurora_diag/
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/doc/aurora-diag
 	install -m755 bin/aurora-diag $(DESTDIR)$(PREFIX)/bin/aurora-diag
 	install -Dm644 data/org.aurorasilicon.Diag.desktop $(DESTDIR)$(PREFIX)/share/applications/org.aurorasilicon.Diag.desktop

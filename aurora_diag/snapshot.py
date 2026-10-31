@@ -15,7 +15,7 @@ import re
 import socket
 import time
 
-from . import __version__, clocks, gpu, services, subsystems, sysfs
+from . import __version__, ane, clocks, gpu, services, subsystems, sysfs
 from .probe import timed
 
 SCHEMA = "aurora-diag/snapshot"
@@ -70,6 +70,7 @@ def build(machine, api=True, budget=None):
     svc = probe("services", services.system_units, [])
     users = probe("user_services", services.user_units, [])
     clk = probe("clocks", clocks.all_clocks, {})
+    an = probe("ane", ane.collect, {"devices": []})
     snap = {
         "schema": SCHEMA, "version": SCHEMA_VERSION, "tool_version": __version__,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -78,6 +79,8 @@ def build(machine, api=True, budget=None):
         "kernel": {"release": os.uname().release, "version": os.uname().version,
                    "cmdline": sysfs.read("/proc/cmdline")},
         "firmware": machine.firmware(),
+        "ane": {d["platform_device"]: {k: d[k] for k in ("driver", "generation", "firmware_version", "compatible")}
+                for d in an["devices"]},
         "subsystems": {s["node"]: {"title": s.get("title") or s["block"], "kind": s["kind"],
                                    "driver": s.get("driver"), "level": s["state"]["level"],
                                    "why": s["state"]["why"], "dt_status": s["dt_status"],
@@ -206,6 +209,12 @@ def diff(a, b):
         if gone:
             _change(out, "improvement", "dmesg", "errors gone", gone, None)
     ga, gb = a.get("gpu", {}), b.get("gpu", {})
+    aa, ab = a.get("ane", {}), b.get("ane", {})
+    for name in sorted(set(aa) | set(ab)):
+        x, y = aa.get(name), ab.get(name)
+        if x != y:
+            sev = "regression" if x and (not y or (x.get("driver") and not y.get("driver"))) else "change"
+            _change(out, sev, "ane", name, x, y)
     if ga.get("devices") != gb.get("devices"):
         _change(out, "change", "gpu", "devices", ga.get("devices"), gb.get("devices"))
     va, vb = (ga.get("vulkan") or {}).get("devices", {}), (gb.get("vulkan") or {}).get("devices", {})
