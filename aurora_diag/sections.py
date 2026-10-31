@@ -219,6 +219,11 @@ def thermal(readings=None):
                   "%d zones, %d trip points" % (len(zones), len(trips)) if zones else "no thermal zone (the device tree has no thermal-zones node for this machine)"),
              item("cooling devices", "ok" if cooling else "absent", "%d cooling devices" % len(cooling) if cooling else "no cooling device registered"),
              item("fans", "ok" if fl else "absent", ", ".join("%s %s rpm" % (f["label"], f["rpm"]) for f in fl) if fl else "fanless (no fan channel in hwmon)")]
+    if hot is None:
+        num = [r for r in temps if isinstance(r["value"], (int, float))]
+        if num:
+            top = max(num, key=lambda r: r["value"])
+            hot, name = top["value"], "%s (hwmon)" % (top.get("label") or top["attr"])
     lvl = "fail" if (hot or 0) >= 100 else "warn" if (hot or 0) >= 90 else "ok"
     tables = [table("Every temperature, hottest first", ("sensor", "now", "device", "id"), rows)]
     if trips:
@@ -775,7 +780,8 @@ def motion():
                         errs[f] = why or raw
                     vals[f] = round(v * scale, 5) if (v is not None and scale and f.endswith("_raw")) else v
                 found.setdefault(kind, []).append({"device": dv, "name": sysfs.read(d + "/name"), "values": vals, "errors": errs,
-                                                   "scale": scale, "sampling_frequency": sysfs.read(d + "/sampling_frequency"),
+                                                   "scale": scale,
+                                                   "sampling_frequency": sysfs.read(d + "/sampling_frequency") or sysfs.read(d + "/" + rx[1:] + "sampling_frequency"),
                                                    "label": sysfs.read(d + "/label"),
                                                    "mount_matrix": sysfs.read(d + "/in_mount_matrix") or sysfs.read(d + "/mount_matrix")})
     # Motion sensor nodes: named accel/gyro/... or with a motion compatible.
@@ -1208,7 +1214,8 @@ def radio():
         ei = _ethtool_drvinfo(n) or {}
         phy = sysfs.basename_of_link(d + "/phy80211")
         rows = [["driver", "%s%s" % (drv or ei.get("driver") or "?", (" " + ei["version"]) if ei.get("version") else "")],
-                ["firmware", ei.get("firmware") or _fw_from_dmesg(drv) or "not reported"],
+                ["firmware (ethtool)", ei.get("firmware") or "not reported by the driver"],
+                ["firmware (kernel log)", _fw_from_dmesg(drv) or "no firmware line in the log"],
                 ["bus", "%s %s" % (ue.get("PCI_SLOT_NAME") or ei.get("bus") or "-", ue.get("PCI_ID") or ue.get("OF_COMPATIBLE_0") or "")],
                 ["phy", phy or "-"], ["state", "%s, carrier %s" % (sysfs.read(d + "/operstate"), sysfs.read(d + "/carrier"))],
                 ["regulatory domain", regd or "unknown (iw not installed?)"]]
@@ -1250,7 +1257,9 @@ def radio():
         else:
             rows.append(["scan results", "needs root (iw scan dump)"])
         tables.append(table("Wi-Fi %s" % n, ("field", "value"), rows))
-        items.append(item("Wi-Fi " + n, "ok", "%s, fw %s, %s%s" % (drv, ei.get("firmware") or "?", ssid or "not connected",
+        fwlog = _fw_from_dmesg(drv)
+        fwv = (re.search(r"version (\S+)", fwlog or "") or [None, None])[1] or ei.get("firmware") or "not reported"
+        items.append(item("Wi-Fi " + n, "ok", "%s, firmware %s, %s%s" % (drv, fwv, ssid or "not connected",
                                                                      (", %s %s" % (_band(freq), lk.get("signal", ""))) if ssid else "")))
         facts["wifi"][n] = {"driver": drv, "firmware": ei.get("firmware"), "phy": bool(phy)}
         if ssid:
