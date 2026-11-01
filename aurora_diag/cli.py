@@ -665,7 +665,9 @@ def cmd_screenshot(args, m):
     except ImportError as e:
         raise control.Refused("screenshots need Textual (python3-textual): %s" % e)
     cap = dashboard.load(args.snapshot)
-    if args.host:
+    if not args.no_redact:
+        cap = dashboard.redact(cap, args.host)
+    elif args.host:
         cap["host"] = args.host
     files = tui_textual.screenshots(cap, args.output, args.prefix or cap.get("host", "capture"),
                                     args.tab.split(",") if args.tab else None,
@@ -826,6 +828,7 @@ def parser():
     x.add_argument("--tab", help="comma list of tabs (overview,sensors,clocks,fans,gpu,ane,compare,subsys,services,coverage,log) "
                    "and drill-downs (show-cpu, show-health, show-audio, ...)")
     x.add_argument("--light", action="store_true", help="light theme")
+    x.add_argument("--no-redact", action="store_true", help="keep Wi-Fi names, MAC addresses and the host name (redacted by default)")
     x.add_argument("--png", action="store_true", help="also write PNGs (rsvg-convert, cairosvg, or qlmanage+sips on macOS)")
     x = sub.add_parser("tui", help="interactive dashboard for humans")
     x.add_argument("--snapshot", help="show a saved `list --json` capture instead of this machine (read only)")

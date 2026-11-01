@@ -118,6 +118,48 @@ def dump(m, path):
     return path
 
 
+MAC = __import__("re").compile(r"\b[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}\b")
+
+
+def redact(d, host=None):
+    """A copy of a capture safe to publish: Wi-Fi network names, MAC and
+    Bluetooth addresses and the host name replaced. Screenshots use it."""
+    ssids = set()
+
+    def find(o):
+        if isinstance(o, dict):
+            if str(o.get("title") or "").startswith("Wi-Fi") and isinstance(o.get("rows"), list):
+                for r in o["rows"]:
+                    if len(r) >= 2 and r[0] == "SSID" and isinstance(r[1], str) and r[1] != "not connected":
+                        ssids.add(r[1])
+            for v in o.values():
+                find(v)
+        elif isinstance(o, list):
+            for v in o:
+                find(v)
+    find(d)
+    names = sorted(ssids, key=len, reverse=True)
+    old_host = d.get("host")
+
+    def clean(o):
+        if isinstance(o, str):
+            for n in names:
+                o = o.replace(n, "<wifi>")
+            o = MAC.sub("xx:xx:xx:xx:xx:xx", o)
+            if host and old_host and old_host != host:
+                o = o.replace(old_host, host)
+            return o
+        if isinstance(o, dict):
+            return {k: clean(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [clean(v) for v in o]
+        return o
+    out = clean(d)
+    if host:
+        out["host"] = host
+    return out
+
+
 def load(path):
     with open(path) as f:
         d = json.load(f)
