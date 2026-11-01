@@ -55,6 +55,33 @@ Every document an agent parses carries `schema` and `version`. A reader should c
 
 Values that move by themselves (temperatures, power, frequencies right now) are not in a snapshot, so two snapshots of an unchanged machine diff clean.
 
+Snapshots also carry optional identity and activation metadata (schema version 1):
+
+    "subsystems": {"<DT path>": {"class_device_ids": {
+        "<class>/<kernel name>": {"path": "<normalised path relative to this device>", "name": "<name attribute or null>"}
+    }, ...}},
+    "service_details": {"<unit>": {"load", "enabled", "result", "type", "bus_name",
+                                     "bus_activatable", "active_sockets": [...], ...}},
+    "user_service_details": {"<user>/<unit>": {...}}
+
+`diff` and `check --expect` compare class devices by class, relative device path
+and name attribute when both sides carry identities. Allocation IDs are
+normalised, while DT addresses, I2C addresses, DMA channels, ALSA device numbers,
+and connector type/index within a card are preserved. Matching uses counts, so
+losing one of two otherwise identical devices still reports a loss. Raw
+`class_devices` names remain available for display. Old snapshots, or comparisons
+with one old snapshot, use class-specific name normalisation and counts; these
+cannot distinguish devices whose only recorded difference is an allocation ID.
+
+An inactive service is healthy when loaded, unmasked, successfully stopped and
+still activatable: its D-Bus name has an activation registration, or one of its
+triggering sockets is loaded and active. Collection reads unit properties and
+D-Bus registration files; it never starts services. Active-to-idle transitions
+remain informational changes. Failed, missing, masked or no longer activatable
+units still regress. For old snapshots without service metadata, only
+`fprintd.service` has the known D-Bus idle exception; other units remain
+conservative. Live `check --expect` always requires current activation evidence.
+
 Since 0.3.0 a snapshot also carries:
 
     "inventory": {"<category>": {stable facts: drivers, firmware versions, connectors and their KMS properties,
