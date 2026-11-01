@@ -15,10 +15,9 @@ as a failed probe instead of a stalled run.
 
 import os
 import re
-from collections import Counter
 import time
 
-from . import ane, gpu, services, snapshot, subsystems, sysfs
+from . import ane, gpu, identity, services, snapshot, subsystems, sysfs
 from .probe import timed
 
 SCHEMA = "aurora-diag/check"
@@ -56,24 +55,13 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
                 lvl = "pass"  # no driver for it in the baseline either: known gap
                 why = "no driver (same as baseline)"
             if b:
-                # Kernel numbering (i2c-2 vs i2c-1, card0 vs card1, input7 vs input9) changes
-                # between boots and kernels. A device only counts as lost when fewer of its
-                # kind (name without the trailing number) exist now than in the baseline.
-                # Devices that exist only while something is plugged in (a Type-C partner,
-                # cable or plug) follow the desk, not the kernel, so they are not compared.
-                plugged = re.compile(r"^typec/port\d+-(partner|cable|plug\d*)$")
-                kind = lambda c: re.sub(r"\d+", "N", c)
-                short = Counter(kind(c) for c in b.get("class_devices", []) if not plugged.match(c)) - \
-                    Counter(kind(c) for c in s.get("class_devices") or [] if not plugged.match(c))
-                # Everything below a USB host controller (disks, HID, its buses while a
-                # dock is attached) is what is plugged in; only the binding is compared.
-                if short and (s.get("block") == "usb" or re.search(r"dwc3|xhci", s.get("driver") or "")):
-                    short = None
-                if short:
-                    lost = sorted(c for c in set(b.get("class_devices", [])) - set(s.get("class_devices") or [])
-                                  if kind(c) in short)
+                lost, _ = identity.class_delta(b, s, ignore_plugged=True)
+                # USB descendants follow attached peripherals; compare binding only.
+                if s.get("block") == "usb" or re.search(r"dwc3|xhci", s.get("driver") or ""):
+                    lost = []
+                if lost:
                     lvl = "fail"
-                    why = "lost %s; %s" % (", ".join(lost or sorted(short)), why)
+                    why = "lost %s; %s" % (", ".join(lost), why)
         out.append(_r("subsys", "%s %s" % (s.get("title") or s["block"], s["name"]), lvl, why, node=s["node"],
                       infra=s["kind"] != "block"))
     if base:
@@ -97,16 +85,23 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
                 lvl = "pass"
             else:
                 lvl = "warn"
+        if services.idle_activatable(u):
+            lvl, why = "pass", "on-demand unit, idle and activatable"
         if base:
             was = base.get("services", {}).get(u["unit"])
-            if was == "active" and u["active"] != "active":
-                if u["active"] == "inactive" and u["enabled"] in ("static", "indirect", "disabled") and u.get("result") in ("success", None, ""):
-                    # D-Bus or socket activated (fprintd): runs while someone uses it.
-                    lvl, why = "pass", "on-demand unit, idle now (active in the baseline); last result %s" % u.get("result")
+            was_ok = was == "active" or services.snapshot_idle(u["unit"], was, base.get("service_details", {}))
+            if was_ok and u["active"] != "active":
+                if services.idle_activatable(u):
+                    lvl, why = "pass", "on-demand unit, idle and activatable (active in the baseline)"
                 else:
-                    lvl, why = "fail", "active in the baseline, now " + u["active"]
+                    lvl, why = "fail", "active or activatable in the baseline, now " + u["active"]
         if lvl != "skip" or base:
             out.append(_r("service", u["unit"], lvl, why))
+    if base:
+        seen_units = {u["unit"] for u in units}
+        for name, was in base.get("services", {}).items():
+            if name not in seen_units and (was == "active" or services.snapshot_idle(name, was, base.get("service_details", {}))):
+                out.append(_r("service", name, "fail", "active or activatable in the baseline, unit gone now"))
 
     sg, err = timed(services.speakerguardd, timeout)
     if not err and sg.get("service") is not None:
