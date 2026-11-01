@@ -29,6 +29,32 @@ Every tile opens a live drill-down (click it, or Tab to it and press Enter). The
 
 Reading needs no privileges, though root sees more (debugfs, dmesg, speakerguardd's state, the actuator's reports). Changes need root.
 
+## Demos
+
+The first tile on the overview is **Demos**: one place to see and start every demo the machine can run, with what you will see, whether this machine can run it (and exactly why not), and a start and a stop. Nothing starts by itself, nothing plays audio, and the camera and microphone demos say so and run only after you start them. The same list is on the command line:
+
+    aurora-diag demo                     # every demo: READY, or ABSENT and why
+    aurora-diag demo motion              # live in the terminal until Ctrl-C (--seconds N, --json)
+    aurora-diag demo avd                 # a quick run: output, then fps and bit-exactness vs macOS
+    aurora-diag --dry-run demo ave       # print the command it would run
+    aurora-diag demo camera-blur --stop  # the demo's own off command
+
+| demo | kind | what you see |
+| --- | --- | --- |
+| motion | live | a spirit level and a tilting laptop from gravity, a compass from the integrated gyro z rate, rotation-rate bars, lid angle, ambient light and colour temperature (`z` re-zeroes) |
+| speakers | live | speakerguardd's model per speaker, live, read only |
+| ave, avd | quick run | hardware encode (avebench, 1080p H.264) and decode (avd-bench, bit-exact against software) with the fps next to the macOS number on the same machine |
+| ane | quick run | MobileNetV1 on the Neural Engine and the CPU (aurora-try classify) |
+| gpu, vkcube | quick run, app | glmark2 off-screen score; the Vulkan cube in a window |
+| camera-blur, camera-frame, camera-denoise, web | app (camera) | aurora-try's camera effects and the browser viewer |
+| captions-file, captions-live, mic-denoise | quick run, app (microphone) | whisper.cpp captions from a file or the microphone; the DeepFilterNet3 microphone |
+| photos, upscale | quick run | aurora-try photo search and 4x upscale |
+
+Programs are found, not assumed: PATH, the desktop user's `~/.local/bin` and `~/aurora-try-dev`, and the bench kits under `/var/tmp` and `/root`. Apps run as the desktop user in their session.
+
+![Demos](docs/screenshots/j616s-demos.png)
+![Motion demo](docs/screenshots/j616s-demo-motion.png)
+
 ## What it covers
 
 Sources walk a kernel class, bus or the device tree, so a driver that appears during bring-up shows up without a change here, and a machine without fans simply has no fan rows. ANE generation names use known SoC compatibles or an explicit generation attribute; the optional macOS comparison is specific to the J616s.
@@ -159,6 +185,7 @@ One module per area, each one a generic discovery over the kernel's interfaces:
 | `clocks.py`, `gpu.py`, `glprobe.py`, `compliance.py` | clocks and ladders; GPU, Vulkan, GL (glprobe runs in its own process) and spec checks |
 | `subsystems.py`, `services.py` | hardware blocks against the device tree; userspace services and Touch ID state |
 | `sections.py` | the thirteen categories behind the overview, the drill-downs, `show`, `coverage` and the inventory in check and snapshot |
+| `demos.py` | the demo list: discovery, the motion drawing, start and stop, result parsing |
 | `kms.py`, `edid.py` | read-only DRM ioctls (connectors, properties, CRTCs, the flattened tree's node order); EDID and DCP dictionary decoders |
 | `check.py`, `snapshot.py`, `report.py`, `probe.py` | the agent side: verdicts, snapshots and diffs, bug reports, per-probe deadlines |
 | `control.py`, `fans.py`, `haptics.py`, `display.py`, `audio.py` | the write path, its policy and journal; fan guard, click strength, display, speaker protection readout |

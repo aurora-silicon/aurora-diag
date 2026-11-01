@@ -74,6 +74,15 @@ Since 0.3.0 a snapshot also carries:
 
 `show all --json` wraps them: `{"schema": "aurora-diag/show", "version": 1, "host", "kernel", "sections": {"<name>": {...}}}`. Names: health, thermal, cpu, gpu, memory, display, radio, storage, power, audio, engines, sensors, system (aliases such as `speaker`, `wifi`, `nvme`, `motion` work too).
 
+## demos (`aurora-diag demo --json`, `demo NAME --json`)
+
+    {"schema": "aurora-diag/demos", "version": 1, "host",
+     "demos": [{"name", "title", "kind": "live" | "bench" | "launch", "engine", "what", "uses": ["camera" | "microphone"],
+                "level": "ok" | "warn" | "absent", "detail": "why", "command": [...] | null,
+                "reference": {"value", "unit", "what", "source"} | null}]}
+
+`demo NAME --json` for a quick run prints `{"demo", "exit", "result": {"fps" | "score" | "ms", "bitexact", "label"}, "summary", "reference"}`; for `motion` it prints one JSON line per sample (accel in m/s^2, gyro in deg/s, lid_deg, lux, cct, heading_deg, tilt). Dashboard captures carry `slow.demos` and `motion_samples`.
+
 ## coverage (`aurora-diag coverage --json`)
 
     {"schema": "aurora-diag/coverage", "version": 1, "host", "kernel",

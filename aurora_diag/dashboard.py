@@ -44,6 +44,9 @@ def slow(m, api=True):
     v, err = timed(lambda: comparison.build(m.as_dict(), sources.collect(["hwmon"]),
                                            out.get("clocks") or {}, out.get("ane") or {}), 8)
     out["comparison"] = v if err is None else {"error": err}
+    from . import demos
+    v, err = timed(demos.inventory, 15)
+    out["demos"] = v if err is None else {"error": err}
     subs = out["subsystems"] if isinstance(out["subsystems"], list) else None
     secs = sections.collect([n for n in sections.ORDER if n != "health"], subs=subs)
     v, err = timed(lambda: check.run(m, api=False, secs=secs), 20)
@@ -96,6 +99,14 @@ def dump(m, path):
                                                     if isinstance(s.get("spark"), (int, float))})} for h in hist]
     d.update({k: hist[-1][k] for k in ("readings", "fans", "hottest", "sections", "t")})
     d["sections"] = dict(d["slow"].get("sections") or {}, **hist[-1]["sections"])
+    # Two seconds of motion at 20 Hz, so a capture can replay the motion demo.
+    from . import demos
+    if any(x["name"] == "motion" and x["level"] in ("ok", "warn") for x in d["slow"].get("demos") or [] if isinstance(x, dict)):
+        ms = []
+        for _ in range(60):
+            ms.append(demos.motion_sample())
+            time.sleep(0.05)
+        d["motion_samples"] = ms
     with open(path, "w") as f:
         json.dump(d, f, default=str)
     return path

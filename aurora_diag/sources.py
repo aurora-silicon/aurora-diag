@@ -17,6 +17,7 @@ bring-up shows up without a change to this tool. A reading is a dict:
     writable  the kernel offers a store for it (policy decides separately)
 """
 
+import math
 import os
 import re
 
@@ -214,6 +215,10 @@ def iio():
             elif "magn" in f:
                 label = "magnetometer"
             elif "angl" in f:
+                # IIO angles are radians (ABI: in_angl_raw * scale); show degrees.
+                if f.endswith("_raw") and isinstance(value, (int, float)) and any(
+                        x in fs for x in (f[:-4] + "_scale", "in_angl_scale")):
+                    value = round(math.degrees(value), 2)
                 unit, label = "deg", "lid angle" if "las" in dev or "lid" in dev else "angle"
             elif "temp" in f:
                 unit = "C"
