@@ -156,7 +156,7 @@ def motion_sample():
     als = _iio("aop-sensors-als")
     if als:
         s["lux"] = sysfs.read_float(als + "/in_illuminance_input")
-        s["cct"] = sysfs.read_float(als + "/in_cct_input")
+        s["cct"] = sysfs.read_float(als + "/in_colortemp_input")
     return s
 
 
