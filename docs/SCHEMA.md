@@ -156,7 +156,7 @@ Generic readings use category `ane` and IDs `ane.accelN.<field>`, always `writab
 ```json
 {
   "schema": "aurora-diag/comparison", "version": 1,
-  "source": "j616s-perf-baseline-20261031/COMPARE.md", "captured": "2026-10-31",
+  "source": "macOS idle and ANE measurements on the J616s", "captured": "2026-10-31",
   "os": "macOS 27.0 (26A428)", "machine": "apple,j616s", "machine_matches": true,
   "rows": [{"id": "idle.phpc", "label": "CPU-side heatpipe power", "value": 2.61,
             "unit": "W", "context": "idle.phpc; idle on AC", "linux": 3.64,
@@ -171,7 +171,7 @@ Live metric IDs: `cpu.p.states`, `cpu.p.min`, `cpu.p.max`, `cpu.e.states`, `cpu.
 
 Saved-only metrics: `ane.b1.rate`, `ane.b1.p50`, `ane.b8.rate`, `ane.b8.p50`. They require exactly one result with matching model, fp16 precision, batch, `ok: true`, zero errors if given, and no `available: false`. Batch-8 throughput is images/s and latency is ms per batch. Add-fixture never matches MobileNet. The result's timestamp appears in the row reason; no freshness claim is made.
 
-The baseline export (`aurora_diag/macos_baseline.json`, installed with the module) uses `schema: "aurora-diag/macos-baseline"`, `version: 1`, a `machine` DT compatible, optional `source`/`captured`/`os`, and `metrics` containing unique `id`, `label`, `value`, `unit`, `context`. Only numeric macOS values and their measurement context are exported from COMPARE.md; historical Linux results are not used. Override with `AURORA_DIAG_MACOS_BASELINE`; override paths and the ANE benchmark path honor `AURORA_DIAG_ROOT` in tests.
+The baseline export (`aurora_diag/macos_baseline.json`, installed with the module) uses `schema: "aurora-diag/macos-baseline"`, `version: 1`, a `machine` DT compatible, optional `source`/`captured`/`os`, and `metrics` containing unique `id`, `label`, `value`, `unit`, `context`. Only numeric macOS values and their measurement context are exported; historical Linux results are not used. Override with `AURORA_DIAG_MACOS_BASELINE`; override paths and the ANE benchmark path honor `AURORA_DIAG_ROOT` in tests.
 
 ## dashboard (`tui --dump FILE`)
 

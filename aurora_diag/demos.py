@@ -32,11 +32,11 @@ import time
 
 from . import log, sysfs
 
-# Reference numbers measured on macOS on the same machine (AVE: the
-# engines report, 2026-10-31; AVD: avd-bench's macos.csv when it is
+# Reference numbers measured on macOS on the same machine (AVE: our
+# VideoToolbox runs; AVD: avd-bench's macos.csv when it is
 # installed). Keyed by board compatible.
 AVE_MACOS = {"apple,j616s": {"h264-1080": 235.6, "hevc-1080": 223.5, "h264-4k": 62.1, "hevc-4k": 59.0}}
-AVE_SOURCE = "macOS VideoToolbox on the same machine (engines report 2026-10-31, COMPARE.md)"
+AVE_SOURCE = "macOS VideoToolbox on the same machine"
 
 
 # -- discovery helpers ----------------------------------------------------------

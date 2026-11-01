@@ -2,7 +2,7 @@
   "schema": "aurora-diag/macos-baseline",
   "version": 1,
   "machine": "apple,j616s",
-  "source": "j616s-perf-baseline-20261031/COMPARE.md",
+  "source": "macOS idle and ANE measurements on the J616s",
   "captured": "2026-10-31",
   "os": "macOS 27.0 (26A428)",
   "metrics": [
