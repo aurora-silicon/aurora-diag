@@ -157,6 +157,8 @@ def motion_sample():
     if als:
         s["lux"] = sysfs.read_float(als + "/in_illuminance_input")
         s["cct"] = sysfs.read_float(als + "/in_colortemp_input")
+        if s["cct"] is None:
+            s["cct"] = sysfs.read_float(als + "/in_cct_input")   # before the documented colortemp ABI
     return s
 
 
