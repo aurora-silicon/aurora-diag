@@ -308,6 +308,7 @@ class DemoScreen(Screen):
     """One demo: what you will see, start (s), stop (x), its live view or output."""
 
     BINDINGS = [Binding("s", "start", "Start"), Binding("x", "stop", "Stop"), Binding("z", "zero", "Re-zero"),
+                Binding("t", "toggle", "Toggle setting"),
                 Binding("escape", "back", "Back"), Binding("q", "back", "Back")]
 
     def __init__(self, name):
@@ -337,7 +338,8 @@ class DemoScreen(Screen):
         d = self.info() or {}
         self.app.sub_title = "Demo: " + d.get("title", self.dname)
         self.query_one("#dm-table", DataTable).display = d.get("name") == "speakers"
-        self.query_one("#dm-art", Static).display = d.get("name") == "motion"
+        self.query_one("#dm-art", Static).display = d.get("name") in ("motion", "whitepoint")
+        self.wp = demos.WhitePointState()
         self.query_one("#dm-log", RichLog).display = d.get("kind") in ("bench", "launch")
         self.state = demos.MotionState()
         self.head("ready, press s to start" if d.get("level") == "ok" else "not available here")
@@ -361,7 +363,8 @@ class DemoScreen(Screen):
             self.running = True
             self.head("running, live (x stops)", "ok")
             if self.app.capture:
-                self.samples = list(self.app.capture.get("motion_samples") or [])
+                key = "whitepoint_samples" if d["name"] == "whitepoint" else "motion_samples"
+                self.samples = list(self.app.capture.get(key) or [])
             self._timer = self.set_interval(0.1 if d["name"] == "motion" else 1.0, self.tick)
             self.tick()
             return
@@ -412,6 +415,16 @@ class DemoScreen(Screen):
                 s = demos.motion_sample()
             self.state.feed(s)
             self.query_one("#dm-art", Static).update(art_text(demos.motion_art(s, self.state)))
+        elif self.dname == "whitepoint":
+            if self.samples is not None:
+                for s in self.samples:
+                    self.wp.feed(s)
+                if self.samples:
+                    self.show_whitepoint(self.samples[-1])
+                self.samples = []
+            elif not getattr(self, "_wp_busy", False):
+                self._wp_busy = True
+                self.sample_whitepoint()
         elif self.dname == "speakers":
             sec = self.app.section("audio") if self.app.capture else sections.audio_section()
             tb = next((t for t in (sec or {}).get("tables", []) if t["title"].startswith("Speakers")), None)
@@ -421,7 +434,49 @@ class DemoScreen(Screen):
                 fill(t, [tuple(fmt(c) for c in r) for r in tb["rows"]])
             self.query_one("#dm-result", Static).update((sec or {}).get("headline", "").replace("\n", "   ·   "))
 
+    @work(thread=True, exclusive=True, group="whitepoint")
+    def sample_whitepoint(self):
+        from . import demos
+        try:
+            s = demos.whitepoint_sample()
+        finally:
+            self._wp_busy = False
+        self.app.call_from_thread(self.show_whitepoint, s, True)
+
+    def show_whitepoint(self, s, feed=False):
+        from . import demos
+        if feed:
+            self.wp.feed(s)
+        t = Text()
+        for i, segs in enumerate(demos.whitepoint_art(s, self.wp)):
+            if i:
+                t.append("\n")
+            for text, style in segs:
+                t.append(text, style=style or "")
+        self.query_one("#dm-art", Static).update(t)
+
+    def action_toggle(self):
+        if self.dname != "whitepoint":
+            return
+        if self.app.capture:
+            self.app.notify("this is a capture: nothing to change", severity="warning")
+            return
+        self.toggle_whitepoint()
+
+    @work(thread=True, group="whitepoint-set")
+    def toggle_whitepoint(self):
+        from . import demos
+        try:
+            cur = demos.whitepoint_setting()
+            before, after = demos.whitepoint_set(not cur)
+            self.app.call_from_thread(self.app.notify, "ambient white point %s (was %s)" % ("on" if after else "off", "on" if before else "off"))
+        except Exception as e:
+            self.app.call_from_thread(self.app.notify, "not changed: %s" % e, severity="warning")
+
     def action_zero(self):
+        if self.dname == "whitepoint":
+            self.wp.reset()
+            return
         if self.state:
             self.state.reset()
             self.app.notify("level and heading re-zeroed")

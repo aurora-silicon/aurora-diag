@@ -42,6 +42,7 @@ The first tile on the overview is **Demos**: one place to see and start every de
 | demo | kind | what you see |
 | --- | --- | --- |
 | motion | live | a spirit level and a tilting laptop from gravity, a compass from the integrated gyro z rate, rotation-rate bars, lid angle, ambient light and colour temperature (`z` re-zeroes) |
+| whitepoint | live | ambient lux and colour temperature, the white point GNOME or KWin chose and applies (night light composed in), whether adaptation is on, available and active, the model's expected value, neutral/applied/model swatches from the blackbody factors with the numbers, a history of ambient vs applied K; `t` (or `demo whitepoint --set on/off`) flips the opt-in setting |
 | speakers | live | speakerguardd's model per speaker, live, read only |
 | ave, avd | quick run | hardware encode (avebench, 1080p H.264) and decode (avd-bench, bit-exact against software) with the fps next to the macOS number on the same machine |
 | ane | quick run | MobileNetV1 on the Neural Engine and the CPU (aurora-try classify) |

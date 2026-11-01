@@ -841,7 +841,7 @@ def sensors(readings=None):
     for r in iio:
         devs.setdefault(r["dev"], []).append(r)
     items = []
-    for kind, rx, unit in (("ambient light", r"illuminance", "lux"), ("colour temperature", r"in_cct", "K"),
+    for kind, rx, unit in (("ambient light", r"illuminance", "lux"), ("colour temperature", r"in_colortemp", "K"),
                            ("lid angle", r"angl", "deg")):
         rr = next((r for r in iio if re.search(rx, r["attr"])), None)
         if rr:

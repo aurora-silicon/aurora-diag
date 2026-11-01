@@ -517,12 +517,27 @@ def cmd_demo(args, m):
     if level not in ("ok", "warn"):
         print("%s: not available here: %s" % (demo.name, detail), file=sys.stderr)
         return 2
+    if demo.name == "whitepoint" and args.set:
+        before, after = demos.whitepoint_set(args.set == "on")
+        print("ambient white point: %s -> %s" % (before, after))
+        return 0
     if demo.kind == "live":
         st = demos.MotionState()
+        wp = demos.WhitePointState()
         t_end = time.monotonic() + args.seconds if args.seconds else None
         try:
             while True:
-                if demo.name == "motion":
+                if demo.name == "whitepoint":
+                    s = demos.whitepoint_sample()
+                    wp.feed(s)
+                    if args.json:
+                        print(json.dumps(s, default=str), flush=True)
+                    else:
+                        sys.stdout.write("\x1b[H\x1b[2J" + "\n".join(demos.whitepoint_plain(demos.whitepoint_art(s, wp))) +
+                                         "\n\n  Ctrl-C stops. aurora-diag demo whitepoint --set on|off changes the setting.\n")
+                        sys.stdout.flush()
+                    time.sleep(1.0)
+                elif demo.name == "motion":
                     s = demos.motion_sample()
                     st.feed(s)
                     if args.json:
@@ -802,6 +817,7 @@ def parser():
     x.add_argument("name", nargs="?")
     x.add_argument("--seconds", type=float, default=0, help="live demos: stop after N seconds")
     x.add_argument("--stop", action="store_true", help="run the demo's off command (camera, mic denoise)")
+    x.add_argument("--set", choices=["on", "off"], help="whitepoint: turn ambient white point adaptation on or off (user setting)")
     x = sub.add_parser("screenshot", help="render dashboard tabs of a capture to SVG (and PNG with --png)")
     x.add_argument("snapshot", help="a capture from `tui --dump FILE`")
     x.add_argument("-o", "--output", default=".", help="directory (default .)")

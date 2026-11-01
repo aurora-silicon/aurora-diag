@@ -156,7 +156,7 @@ def motion_sample():
     als = _iio("aop-sensors-als")
     if als:
         s["lux"] = sysfs.read_float(als + "/in_illuminance_input")
-        s["cct"] = sysfs.read_float(als + "/in_cct_input")
+        s["cct"] = sysfs.read_float(als + "/in_colortemp_input")
     return s
 
 
@@ -599,6 +599,12 @@ def build():
              "(integrated gyro z), live rotation-rate bars, the lid angle and the ambient light. Tilt or turn the "
              "machine. z re-zeroes the level and the heading.",
              motion_probe),
+        Demo("whitepoint", "Ambient white point (True Tone style)", "live", "ALS colour + GNOME/KWin",
+             "the ambient light (lux, colour temperature), the display white point the desktop chose and the one "
+             "it applies (night light composed in), whether adaptation is on, available and active, the model's "
+             "expected value, neutral vs adapted swatches drawn from the blackbody factors, and a history of ambient "
+             "vs applied K. t turns the setting on or off (your choice, default off).",
+             whitepoint_probe),
         Demo("speakers", "Speaker protection", "live", "speakerguardd (read only)",
              "each speaker's modelled coil and magnet temperature, power and measured voltage, live. Nothing plays.",
              speaker_probe),
@@ -762,3 +768,251 @@ def result_line(demo, text):
         parts.append("macOS %.1f fps (%.0f%%)" % (ref["value"], 100.0 * r["fps"] / ref["value"]))
     log.event("demo_result", demo=demo.name, result=r, reference=ref)
     return ", ".join(parts), r
+
+
+# -- ambient white point (True Tone style) ------------------------------------------------
+
+GSD = ("org.gnome.SettingsDaemon.Color", "/org/gnome/SettingsDaemon/Color", "org.gnome.SettingsDaemon.Color")
+KWIN = ("org.kde.KWin.NightLight", "/org/kde/KWin/NightLight", "org.kde.KWin.NightLight")
+PROXY = ("net.hadess.SensorProxy", "/net/hadess/SensorProxy", "net.hadess.SensorProxy")
+GSD_SCHEMA, GSD_KEY = "org.gnome.settings-daemon.plugins.color", "ambient-white-point-enabled"
+
+
+def _gvariant_props(text):
+    """GetAll's GVariant text as a dict of Python values."""
+    out = {}
+    for k, v in re.findall(r"'(\w+)': <((?:[^<>]|<[^<>]*>)*)>", text or ""):
+        v = re.sub(r"^(uint32|int32|uint64|int64|double|byte|uint16|int16)\s+", "", v.strip())
+        if v in ("true", "false"):
+            out[k] = v == "true"
+        elif v.startswith("'"):
+            out[k] = v.strip("'")
+        else:
+            try:
+                out[k] = float(v) if re.search(r"[.eE]", v) else int(v)
+            except ValueError:
+                out[k] = v
+    return out
+
+
+def _getall(bus, dest, path, iface, user=None):
+    from . import sections
+    rc, out = sections._run(["gdbus", "call", "--" + bus, "--dest", dest, "--object-path", path, "--method",
+                             "org.freedesktop.DBus.Properties.GetAll", iface], user=user, timeout=3)
+    if rc is None:
+        return None, "gdbus is not installed"
+    if rc != 0 or not out.strip():
+        return None, "%s is not on the %s bus" % (dest, bus)
+    return _gvariant_props(out), None
+
+
+def mired(k):
+    return 1e6 / k if k else None
+
+
+def white_point_model(ambient_k, lux):
+    """What the daemons should choose: half the ambient shift in mired from
+    6500 K, clamped to 5000-6500 K, faded out between 50 and 5 lux."""
+    if not ambient_k or lux is None:
+        return None
+    m = mired(6500) + 0.5 * (mired(ambient_k) - mired(6500))
+    k = min(6500.0, max(5000.0, 1e6 / m))
+    w = min(1.0, max(0.0, (lux - 5.0) / 45.0))
+    return 6500.0 + (k - 6500.0) * w
+
+
+def blackbody(k):
+    """RGB factors (0-1) of a blackbody at k kelvin, normalised to 6500 K =
+    white (Tanner Helland's fit; a rendering of the factors, not a
+    measurement of the screen)."""
+    def raw(t):
+        t = t / 100.0
+        r = 255.0 if t <= 66 else 329.698727446 * ((t - 60) ** -0.1332047592)
+        g = 99.4708025861 * math.log(t) - 161.1195681661 if t <= 66 else 288.1221695283 * ((t - 60) ** -0.0755148492)
+        b = 255.0 if t >= 66 else (0.0 if t <= 19 else 138.5177312231 * math.log(t - 10) - 305.0447927307)
+        return [min(255.0, max(0.0, x)) for x in (r, g, b)]
+    ref = raw(6500.0)
+    return [min(1.0, a / b) if b else 0.0 for a, b in zip(raw(float(k)), ref)]
+
+
+def whitepoint_sample():
+    s = {"t": time.monotonic(), "sources": {}, "absent": []}
+    # Sensor: iio-sensor-proxy (values move only while someone holds ClaimLight), else sysfs.
+    p, why = _getall("system", *PROXY)
+    if p:
+        s["proxy"] = p
+        if p.get("ColorTemperature"):
+            s["cct"], s["sources"]["cct"] = p["ColorTemperature"], "iio-sensor-proxy ColorTemperature"
+        elif "ColorTemperature" not in p:
+            s["absent"].append("iio-sensor-proxy has no ColorTemperature property (the patched iio-sensor-proxy is not installed)")
+    else:
+        s["absent"].append("iio-sensor-proxy: " + why)
+    for d in sysfs.listdir("/sys/bus/iio/devices"):
+        base = "/sys/bus/iio/devices/" + d
+        for f, key in (("in_colortemp_input", "cct"), ("in_cct_input", "cct"), ("in_illuminance_input", "lux")):
+            v = sysfs.read_float(base + "/" + f)
+            if v is not None and key not in s:
+                s[key], s["sources"][key] = v, "sysfs %s/%s" % (sysfs.read(base + "/name") or d, f)
+    if "lux" not in s and p and p.get("HasAmbientLight"):
+        s["lux"], s["sources"]["lux"] = p.get("LightLevel"), "iio-sensor-proxy LightLevel"
+    u = desktop_user()
+    g, gwhy = _getall("session", *GSD, user=u) if u else (None, "no desktop session")
+    k, kwhy = _getall("session", *KWIN, user=u) if u else (None, "no desktop session")
+    if g:
+        s["desktop"] = "GNOME"
+        s["applied_k"] = g.get("Temperature")
+        s["night_light"] = g.get("NightLightActive")
+        s["available"] = g.get("AmbientWhitePointAvailable")
+        s["active"] = g.get("AmbientWhitePointActive")
+        s["daemon_ambient_k"] = g.get("AmbientColorTemperature")
+        s["chosen_k"] = g.get("AmbientWhitePointTemperature")
+        if "AmbientWhitePointAvailable" not in g:
+            s["absent"].append("gnome-settings-daemon has no AmbientWhitePoint properties (the patched gsd is not installed)")
+    elif k:
+        s["desktop"] = "KDE"
+        s["applied_k"] = k.get("appliedTemperature", k.get("currentTemperature"))
+        s["night_light_k"] = k.get("currentTemperature")
+        s["night_light"] = (k.get("currentTemperature") or 6500) < 6500
+        s["available"] = k.get("ambientWhitePointAvailable")
+        s["active"] = k.get("ambientWhitePointActive")
+        s["enabled"] = k.get("ambientWhitePointEnabled")
+        s["daemon_ambient_k"] = k.get("ambientColorTemperature")
+        s["chosen_k"] = k.get("ambientWhitePointTemperature")
+        if "ambientWhitePointAvailable" not in k:
+            s["absent"].append("KWin has no ambientWhitePoint properties (the patched KWin is not installed)")
+    else:
+        s["absent"].append("no GNOME or KDE colour service: %s; %s" % (gwhy, kwhy))
+    s["enabled"] = s.get("enabled", whitepoint_setting())
+    s["model_k"] = white_point_model(s.get("cct"), s.get("lux"))
+    return s
+
+
+def whitepoint_setting():
+    """The user's opt-in, or None when the setting does not exist yet."""
+    from . import sections
+    u = desktop_user()
+    if not u:
+        return None
+    rc, out = sections._run(["gsettings", "get", GSD_SCHEMA, GSD_KEY], user=u, timeout=3)
+    if rc == 0 and out.strip() in ("true", "false"):
+        return out.strip() == "true"
+    rc, out = sections._run(["kreadconfig6", "--file", "kwinrc", "--group", "NightColor", "--key", "AmbientWhitePoint"],
+                            user=u, timeout=3)
+    if rc == 0 and out.strip() in ("true", "false"):
+        return out.strip() == "true"
+    return None
+
+
+def whitepoint_set(on):
+    """Flip the user's setting (GNOME gsettings or KWin's kwinrc). Logged
+    with the value before and after; it is the user's choice, default off."""
+    from . import sections
+    u = desktop_user()
+    if not u:
+        raise RuntimeError("no desktop session")
+    before = whitepoint_setting()
+    if before is None:
+        raise RuntimeError("the ambient white point setting does not exist here (patched gsd or KWin not installed)")
+    val = "true" if on else "false"
+    rc, _ = sections._run(["gsettings", "set", GSD_SCHEMA, GSD_KEY, val], user=u, timeout=5)
+    if rc != 0:
+        rc, _ = sections._run(["kwriteconfig6", "--file", "kwinrc", "--group", "NightColor", "--key", "AmbientWhitePoint", val],
+                              user=u, timeout=5)
+    after = whitepoint_setting()
+    log.event("set", kind="desktop-setting", path="ambient-white-point", original=before, new=on, readback=after, user=u.pw_name)
+    if after != on:
+        raise RuntimeError("the setting did not change (read back %s)" % after)
+    return before, after
+
+
+class WhitePointState:
+    def __init__(self, keep=300):
+        self.keep = keep
+        self.hist = []
+
+    def reset(self):
+        self.hist = []
+
+    def feed(self, s):
+        self.hist.append((s.get("cct"), s.get("applied_k")))
+        self.hist = self.hist[-self.keep:]
+
+
+SPARK = "▁▂▃▄▅▆▇█"
+
+
+def _spark(vals, lo=2500.0, hi=7500.0, width=60):
+    vals = vals[-width:]
+    return "".join(" " if v is None else SPARK[int(min(1, max(0, (v - lo) / (hi - lo))) * (len(SPARK) - 1))] for v in vals)
+
+
+def whitepoint_art(s, st):
+    """Lines of (text, style) segments: numbers first, swatches second."""
+    L = []
+    k = lambda v: ("%d K" % v) if isinstance(v, (int, float)) and v else "-"
+    yn = lambda v: {True: "yes", False: "no", None: "unknown"}[v if v in (True, False) else None]
+    L.append([("  Ambient light   ", "bold"), ("%s lux" % ("%.0f" % s["lux"] if s.get("lux") is not None else "-"), ""),
+              ("   colour %s" % k(s.get("cct")), "bold"), ("   (%s)" % ", ".join("%s: %s" % kv for kv in s["sources"].items()), "dim")])
+    L.append([("  Display         ", "bold"), ("applied %s" % k(s.get("applied_k")), "bold"),
+              ("   ambient choice %s" % k(s.get("chosen_k")), ""), ("   night light %s" % yn(s.get("night_light")), "")])
+    L.append([("  Adaptation      ", "bold"), ("setting %s" % {True: "ON", False: "off", None: "not present"}[s.get("enabled")], "bold"),
+              ("   available %s   active %s" % (yn(s.get("available")), yn(s.get("active"))), "")])
+    why = "model: half the ambient shift in mired, 5000-6500 K, fades out from 50 to 5 lux, 10 s median, 1 mired/s; night light wins"
+    if s.get("model_k"):
+        L.append([("  Model expects   ", "bold"), ("%s for %s at %s lux" % (k(s["model_k"]), k(s.get("cct")), "%.0f" % (s.get("lux") or 0)), ""),
+                  ("   (%s)" % why, "dim")])
+    else:
+        L.append([("  Model           ", "bold"), (why, "dim")])
+    L.append([])
+    target = s.get("applied_k") or s.get("chosen_k") or s.get("model_k") or 6500
+    mk = s.get("model_k")
+    n, a = blackbody(6500), blackbody(target)
+    m = blackbody(mk) if mk else None
+    rgb = lambda f: "rgb(%d,%d,%d)" % tuple(int(round(x * 255)) for x in f)
+    hdr = [("  neutral 6500 K".ljust(28), "bold"), ("applied %s" % k(target), "bold")]
+    if m:
+        hdr += [("".ljust(26 - len("applied %s" % k(target))), ""), ("model expects %s" % k(mk), "bold")]
+    L.append(hdr)
+    for _ in range(4):
+        row = [("  ", ""), (" " * 22, "on " + rgb(n)), ("    ", ""), (" " * 22, "on " + rgb(a))]
+        if m:
+            row += [("    ", ""), (" " * 22, "on " + rgb(m))]
+        L.append(row)
+    fac = [("  R %.3f G %.3f B %.3f".ljust(28) % tuple(n), ""), ("R %.3f G %.3f B %.3f".ljust(26) % tuple(a), "")]
+    if m:
+        fac.append(("R %.3f G %.3f B %.3f" % tuple(m), ""))
+    L.append(fac)
+    L.append([("  a rendering of the blackbody RGB factors, not a measurement: the screen itself is already shifted", "dim")])
+    L.append([])
+    amb = [h[0] for h in st.hist]
+    app = [h[1] for h in st.hist]
+    L.append([("  History (last %d samples, 2500-7500 K)" % len(st.hist), "bold")])
+    L.append([("  ambient ", ""), (_spark(amb), "yellow"), ("  %s" % k(amb[-1] if amb else None), "")])
+    L.append([("  applied ", ""), (_spark(app), "cyan"), ("  %s" % k(app[-1] if app else None), "")])
+    if s["absent"]:
+        L.append([])
+        for a_ in s["absent"]:
+            L.append([("  absent: ", "bold"), (a_, "dim")])
+    return L
+
+
+def whitepoint_plain(lines):
+    """The segments as terminal text (24-bit colour for the swatches)."""
+    out = []
+    for segs in lines:
+        t = ""
+        for text, style in segs:
+            m = re.match(r"on rgb\((\d+),(\d+),(\d+)\)", style or "")
+            t += ("\x1b[48;2;%s;%s;%sm%s\x1b[0m" % (m.group(1), m.group(2), m.group(3), text)) if m else text
+        out.append(t)
+    return out
+
+
+def whitepoint_probe():
+    s = whitepoint_sample()
+    if s.get("cct") is None:
+        return "absent", "no colour temperature: no in_colortemp_input or in_cct_input and no ColorTemperature from iio-sensor-proxy"
+    missing = [a for a in s["absent"]]
+    if missing:
+        return "ok", "ambient %d K from %s; not yet: %s" % (s["cct"], s["sources"].get("cct"), "; ".join(missing))
+    return "ok", "ambient %d K, %s white point %s" % (s["cct"], s.get("desktop"), "on" if s.get("enabled") else "off")

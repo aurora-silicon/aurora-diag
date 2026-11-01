@@ -107,6 +107,12 @@ def dump(m, path):
             ms.append(demos.motion_sample())
             time.sleep(0.05)
         d["motion_samples"] = ms
+    if any(x["name"] == "whitepoint" and x["level"] == "ok" for x in d["slow"].get("demos") or [] if isinstance(x, dict)):
+        ws = []
+        for _ in range(8):
+            ws.append(demos.whitepoint_sample())
+            time.sleep(0.5)
+        d["whitepoint_samples"] = ws
     with open(path, "w") as f:
         json.dump(d, f, default=str)
     return path
