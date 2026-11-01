@@ -918,7 +918,8 @@ def whitepoint_set(on):
     val = "true" if on else "false"
     rc, _ = sections._run(["gsettings", "set", GSD_SCHEMA, GSD_KEY, val], user=u, timeout=5)
     if rc != 0:
-        rc, _ = sections._run(["kwriteconfig6", "--file", "kwinrc", "--group", "NightColor", "--key", "AmbientWhitePoint", val],
+        # --notify: KWin's config watcher only sees changes announced over D-Bus.
+        rc, _ = sections._run(["kwriteconfig6", "--notify", "--file", "kwinrc", "--group", "NightColor", "--key", "AmbientWhitePoint", val],
                               user=u, timeout=5)
     after = whitepoint_setting()
     log.event("set", kind="desktop-setting", path="ambient-white-point", original=before, new=on, readback=after, user=u.pw_name)
@@ -959,7 +960,7 @@ def whitepoint_art(s, st):
               ("   ambient choice %s" % k(s.get("chosen_k")), ""), ("   night light %s" % yn(s.get("night_light")), "")])
     L.append([("  Adaptation      ", "bold"), ("setting %s" % {True: "ON", False: "off", None: "not present"}[s.get("enabled")], "bold"),
               ("   available %s   active %s" % (yn(s.get("available")), yn(s.get("active"))), "")])
-    why = "model: half the ambient shift in mired, 5000-6500 K, fades out from 50 to 5 lux, 10 s median, 1 mired/s; night light wins"
+    why = "model: half the ambient shift in mired, 5000-6500 K, fades out from 50 to 5 lux, 10 s median, each change ramps over 2 s; night light wins"
     if s.get("model_k"):
         L.append([("  Model expects   ", "bold"), ("%s for %s at %s lux" % (k(s["model_k"]), k(s.get("cct")), "%.0f" % (s.get("lux") or 0)), ""),
                   ("   (%s)" % why, "dim")])
