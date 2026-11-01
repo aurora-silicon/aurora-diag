@@ -413,9 +413,16 @@ def gpu(slow=None):
             hz / 1e6, (st.get("requested_frequency_hz") or 0) / 1e6 if isinstance(st.get("requested_frequency_hz"), (int, float)) else "?", st.get("pstate"))))
     elif freq:
         items.append(item("frequency", "ok", "devfreq " + ", ".join("%s %s" % (f[0], f[1]) for f in freq)))
+    elif isinstance(st.get("requested_frequency_hz"), (int, float)):
+        items.append(item("frequency", "ok", "%.0f MHz requested (pstate %s); achieved clock not exposed" % (
+            st["requested_frequency_hz"] / 1e6, st.get("pstate"))))
     elif isinstance(pstate_hz, (int, float)):
         items.append(item("frequency", "ok", "%.0f MHz requested (pstate %s of the device-tree operating points); achieved clock not exposed" % (
             pstate_hz / 1e6, st.get("pstate"))))
+    elif st.get("pstate_status") in ("unsupported", "unavailable") and st.get("achieved_frequency_hz") == "unsupported":
+        # G16S/G17P firmware never reports the GPU pstate or clock (agx_stats says so), so there is nothing to read.
+        items.append(item("frequency", "off", "not available on this GPU: the firmware does not report the GPU clock or pstate "
+                          "(agx_stats pstate_status=%s)" % st.get("pstate_status")))
     else:
         items.append(item("frequency", "absent", "not exposed: agx_stats achieved_frequency_hz=%s, pstate_status=%s, and no devfreq device" % (
             st.get("achieved_frequency_hz", "missing"), st.get("pstate_status", "missing"))))

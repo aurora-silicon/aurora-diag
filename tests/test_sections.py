@@ -309,7 +309,19 @@ class TestGpuStats(Base):
                          "achieved_frequency_hz unsupported\nbusy_ns unsupported\n")
         self.assertEqual(items["utilisation"]["level"], "ok")
         self.assertIn("55% busy", items["utilisation"]["detail"])
-        self.assertEqual(items["frequency"]["level"], "absent")
+        self.assertEqual(items["frequency"]["level"], "off")
+        self.assertIn("not available on this GPU", items["frequency"]["detail"])
+
+    def test_g17_firmware_unsupported_pstate(self):
+        items = self.gpu("utilisation_status valid\nutil_device_percent 100\npstate_status unsupported\npstate unsupported\n"
+                         "requested_frequency_hz unsupported\nachieved_frequency_hz unsupported\n")
+        self.assertEqual(items["frequency"]["level"], "off")
+        self.assertIn("pstate_status=unsupported", items["frequency"]["detail"])
+
+    def test_g14_kernel_requested_frequency(self):
+        items = self.gpu("busy_ns 1000\njobs 5\npstate 2\npower_mw 0\nutil1 0\nrequested_frequency_hz 612000000\n")
+        self.assertEqual(items["frequency"]["level"], "ok")
+        self.assertIn("612 MHz requested (pstate 2)", items["frequency"]["detail"])
 
     def test_g17_idle_is_not_absent(self):
         items = self.gpu("utilisation_status stale\nutil_device_percent unsupported\npstate_status unavailable\n"
