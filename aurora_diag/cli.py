@@ -494,6 +494,83 @@ def cmd_show(args, m):
             sys.stdout.write(sections.render(secs[n]) + "\n")
 
 
+def cmd_demo(args, m):
+    """List the demos, or run one: live ones draw in the terminal until
+    Ctrl-C (or --seconds), quick runs print their output and result, apps
+    run until Ctrl-C and then their off command runs."""
+    from . import demos
+    if not args.name:
+        inv = demos.inventory()
+        if args.json:
+            print(json.dumps({"schema": "aurora-diag/demos", "version": 1, "host": os.uname().nodename, "demos": inv}, default=str))
+            return 0
+        for d in inv:
+            print("%-7s %-15s %-7s %s" % ({"ok": "READY"}.get(d["level"], d["level"].upper()), d["name"], d["kind"], d["detail"]))
+        print("\naurora-diag demo NAME runs one (nothing runs until you ask). --dry-run shows the command.")
+        return 0
+    demo = demos.get(args.name)
+    level, detail = demo.probe()
+    if args.stop:
+        out = demos.stop(demo, None)
+        print(out or "stopped %s" % demo.name)
+        return 0
+    if level not in ("ok", "warn"):
+        print("%s: not available here: %s" % (demo.name, detail), file=sys.stderr)
+        return 2
+    if demo.kind == "live":
+        st = demos.MotionState()
+        t_end = time.monotonic() + args.seconds if args.seconds else None
+        try:
+            while True:
+                if demo.name == "motion":
+                    s = demos.motion_sample()
+                    st.feed(s)
+                    if args.json:
+                        print(json.dumps(dict(s, heading_deg=st.heading, tilt=demos.tilt(s["accel"]) if s.get("accel") and None not in s["accel"] else None)), flush=True)
+                    else:
+                        sys.stdout.write("\x1b[H\x1b[2J" + "\n".join(demos.motion_art(s, st)) + "\n\n  Ctrl-C stops.\n")
+                        sys.stdout.flush()
+                    time.sleep(0.1 if not args.json else 0.5)
+                else:
+                    from . import sections
+                    sec = sections.audio_section()
+                    if args.json:
+                        print(json.dumps(sec, default=str), flush=True)
+                    else:
+                        sys.stdout.write("\x1b[H\x1b[2J" + sections.render(sec) + "\n  Ctrl-C stops. Nothing plays.\n")
+                        sys.stdout.flush()
+                    time.sleep(1.0)
+                if t_end and time.monotonic() >= t_end:
+                    break
+        except KeyboardInterrupt:
+            pass
+        return 0
+    cmd = demo.command()
+    if args.dry_run or not cmd:
+        print(" ".join(cmd) if cmd else "no command for %s here" % demo.name)
+        return 0 if cmd else 2
+    print("%s: %s\nrunning: %s%s" % (demo.title, demo.what, " ".join(cmd),
+                                      "\n(Ctrl-C stops it)" if demo.kind == "launch" else ""), file=sys.stderr)
+    p = demos.spawn(demo, cmd)
+    out = []
+    try:
+        for line in p.stdout:
+            out.append(line)
+            if not args.json:
+                sys.stdout.write(line)
+        rc = p.wait()
+    except KeyboardInterrupt:
+        demos.stop(demo, p)
+        rc = 130
+    res, r = demos.result_line(demo, "".join(out))
+    if args.json:
+        print(json.dumps({"demo": demo.name, "exit": rc, "result": r, "summary": res,
+                          "reference": demo.reference() if demo.reference else None}, default=str))
+    elif res:
+        print("\nresult: " + res)
+    return 0 if rc == 0 else 1
+
+
 def cmd_coverage(args, m):
     """Every category item, present or absent with the reason."""
     from . import sections
@@ -721,6 +798,10 @@ def parser():
     x.add_argument("name", nargs="?", default="all")
     x.add_argument("--interval", type=float, default=0.5, help="CPU sampling interval for per-core load (default 0.5 s)")
     sub.add_parser("coverage", help="every category item: present, or absent with the reason")
+    x = sub.add_parser("demo", help="list the demos, or run one (motion, speakers, ave, avd, ane, gpu, camera-*, captions-*, ...)")
+    x.add_argument("name", nargs="?")
+    x.add_argument("--seconds", type=float, default=0, help="live demos: stop after N seconds")
+    x.add_argument("--stop", action="store_true", help="run the demo's off command (camera, mic denoise)")
     x = sub.add_parser("screenshot", help="render dashboard tabs of a capture to SVG (and PNG with --png)")
     x.add_argument("snapshot", help="a capture from `tui --dump FILE`")
     x.add_argument("-o", "--output", default=".", help="directory (default .)")
@@ -741,7 +822,7 @@ def parser():
 COMMANDS = {
     "machine": cmd_machine, "sensors": cmd_sensors, "list": cmd_sensors, "log": cmd_log,
     "report": cmd_report, "gpu": cmd_gpu, "ane": cmd_ane, "compare": cmd_compare, "check": cmd_check, "snapshot": cmd_snapshot,
-    "diff": cmd_diff, "screenshot": cmd_screenshot, "show": cmd_show, "coverage": cmd_coverage, "clocks": cmd_clocks, "subsys": cmd_subsys, "services": cmd_services, "summary": cmd_summary, "get": cmd_get,
+    "diff": cmd_diff, "screenshot": cmd_screenshot, "show": cmd_show, "coverage": cmd_coverage, "demo": cmd_demo, "clocks": cmd_clocks, "subsys": cmd_subsys, "services": cmd_services, "summary": cmd_summary, "get": cmd_get,
     "set": cmd_set, "watch": cmd_watch, "fan": cmd_fan, "fan-guard": cmd_fan_guard,
     "haptic": cmd_haptic, "display": cmd_display, "kbd": cmd_kbd, "audio": cmd_audio,
     "journal": cmd_journal, "restore": cmd_restore, "tui": cmd_tui, "log-path": cmd_log_path,

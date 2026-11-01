@@ -223,6 +223,233 @@ class Detail(Screen):
             fill(t, rows)
 
 
+KIND_LABEL = {"live": "live view", "bench": "quick run", "launch": "app"}
+ART_STYLE = {"●": "bold green", "(": "green", ")": "green", "◆": "bold red", "•": "red", "◉": "bold",
+             "N": "bold", "E": "bold", "S": "bold", "W": "bold", "█": "cyan", "░": "dim cyan", "▀": "cyan"}
+
+
+def art_text(lines):
+    """The demo's text drawing with a little colour (bubble, needle, laptop)."""
+    t = Text()
+    for i, ln in enumerate(lines):
+        if i:
+            t.append("\n")
+        if ln.lstrip().startswith(("x ", "y ", "z ")) and "│" in ln:
+            t.append(ln.replace("█", "▮"), style="magenta")
+            continue
+        if 1 <= i <= 11:            # the three drawings
+            for ch in ln:
+                t.append(ch, style=ART_STYLE.get(ch, ""))
+        else:
+            t.append(ln, style="bold" if i == 0 else "")
+    return t
+
+
+class DemosHome(Screen):
+    """Every demo this machine can run, and why not where it can't."""
+
+    BINDINGS = [Binding("escape", "back", "Back"), Binding("q", "back", "Back"), Binding("enter", "open", "Open demo")]
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        yield Static("", id="dh-head")
+        yield DataTable(id="dh-list", zebra_stripes=True, cursor_type="row")
+        yield Static("", id="dh-what")
+        yield Footer()
+
+    def on_mount(self):
+        self._prev_sub = self.app.sub_title
+        self.app.sub_title = "Demos"
+        t = self.query_one("#dh-list", DataTable)
+        t.add_columns("", "demo", "kind", "engine", "on this machine")
+        self.update()
+        t.focus()
+
+    def demos(self):
+        return self.app.demo_list()
+
+    def update(self):
+        ds = self.demos()
+        n = sum(1 for d in ds if d["level"] == "ok")
+        self.query_one("#dh-head", Static).update(Text.assemble(
+            ("Demos", "bold"), "   %d of %d ready here. Enter or click opens one; nothing starts until you press s inside. "
+            "No audio plays; camera and microphone demos say so and run only when you start them." % (n, len(ds))))
+        fill(self.query_one("#dh-list", DataTable),
+             [(chip(d["level"], {"ok": "READY", "warn": "WARN", "absent": "ABSENT"}.get(d["level"])), d["title"],
+               KIND_LABEL.get(d["kind"], d["kind"]) + (" · " + ", ".join(d["uses"]) if d["uses"] else ""), d["engine"],
+               fmt(d["detail"], width=90)) for d in ds])
+        self.show_what()
+
+    def on_data_table_row_highlighted(self, ev):
+        self.show_what()
+
+    def show_what(self):
+        ds = self.demos()
+        t = self.query_one("#dh-list", DataTable)
+        if ds and 0 <= t.cursor_row < len(ds):
+            d = ds[t.cursor_row]
+            self.query_one("#dh-what", Static).update(Text.assemble(("What you'll see: ", "bold"), d["what"]))
+
+    def on_data_table_row_selected(self, ev):
+        self.action_open()
+
+    def action_open(self):
+        ds = self.demos()
+        t = self.query_one("#dh-list", DataTable)
+        if ds and 0 <= t.cursor_row < len(ds):
+            self.app.push_screen(DemoScreen(ds[t.cursor_row]["name"]))
+
+    def action_back(self):
+        self.app.sub_title = self._prev_sub
+        self.app.pop_screen()
+
+
+class DemoScreen(Screen):
+    """One demo: what you will see, start (s), stop (x), its live view or output."""
+
+    BINDINGS = [Binding("s", "start", "Start"), Binding("x", "stop", "Stop"), Binding("z", "zero", "Re-zero"),
+                Binding("escape", "back", "Back"), Binding("q", "back", "Back")]
+
+    def __init__(self, name):
+        super().__init__()
+        self.dname = name
+        self.proc = None
+        self.running = False
+        self.state = None
+        self.samples = None
+
+    def info(self):
+        return next((d for d in self.app.demo_list() if d["name"] == self.dname), None)
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        yield Static("", id="dm-head")
+        yield Static("", id="dm-what")
+        yield Static("", id="dm-result")
+        yield Static("", id="dm-art")
+        yield DataTable(id="dm-table", zebra_stripes=True, cursor_type="row")
+        yield RichLog(id="dm-log", wrap=True, highlight=False, markup=False)
+        yield Footer()
+
+    def on_mount(self):
+        from . import demos
+        self._prev_sub = self.app.sub_title
+        d = self.info() or {}
+        self.app.sub_title = "Demo: " + d.get("title", self.dname)
+        self.query_one("#dm-table", DataTable).display = d.get("name") == "speakers"
+        self.query_one("#dm-art", Static).display = d.get("name") == "motion"
+        self.query_one("#dm-log", RichLog).display = d.get("kind") in ("bench", "launch")
+        self.state = demos.MotionState()
+        self.head("ready, press s to start" if d.get("level") == "ok" else "not available here")
+        self.query_one("#dm-what", Static).update(Text.assemble(("What you'll see: ", "bold"), d.get("what", ""),
+                                                                "\n", ("On this machine: ", "bold"), d.get("detail", ""),
+                                                                ("\nCommand: " + " ".join(d["command"])) if d.get("command") else ""))
+
+    def head(self, status, level=None):
+        d = self.info() or {}
+        self.query_one("#dm-head", Static).update(Text.assemble(
+            chip(level or d.get("level")), "  ", (d.get("title", self.dname), "bold"), "   ", status))
+
+    def action_start(self):
+        d = self.info()
+        if not d or self.running:
+            return
+        if d["level"] not in ("ok", "warn"):
+            self.app.notify("not available here: " + d["detail"], severity="warning")
+            return
+        if d["kind"] == "live":
+            self.running = True
+            self.head("running, live (x stops)", "ok")
+            if self.app.capture:
+                self.samples = list(self.app.capture.get("motion_samples") or [])
+            self._timer = self.set_interval(0.1 if d["name"] == "motion" else 1.0, self.tick)
+            self.tick()
+            return
+        if self.app.capture:
+            self.app.notify("this is a capture: demos run only live", severity="warning")
+            return
+        self.running = True
+        self.head("running (x stops)", "ok")
+        self.query_one("#dm-log", RichLog).clear()
+        self.run_proc()
+
+    @work(thread=True, exclusive=True, group="demo")
+    def run_proc(self):
+        from . import demos
+        demo = demos.get(self.dname)
+        cmd = demo.command()
+        if not cmd:
+            self.app.call_from_thread(self.head, "no command to run", "warn")
+            self.running = False
+            return
+        self.proc = demos.spawn(demo, cmd)
+        out = []
+        for line in self.proc.stdout:
+            out.append(line)
+            self.app.call_from_thread(self.query_one("#dm-log", RichLog).write, line.rstrip("\n"))
+        rc = self.proc.wait()
+        text = "".join(out)
+        res, _ = demos.result_line(demo, text)
+        self.running = False
+        self.app.call_from_thread(self.finished, rc, res)
+
+    def finished(self, rc, res):
+        self.head("finished (exit %s)" % rc, "ok" if rc == 0 else "warn")
+        self.query_one("#dm-result", Static).update(Text.assemble(("Result: ", "bold"), res or "see the output below"))
+
+    def tick(self):
+        from . import demos, sections
+        if not self.running:
+            return
+        if self.dname == "motion":
+            if self.samples is not None:
+                if not self.samples:
+                    return
+                s = self.samples.pop(0)
+                if not self.samples:
+                    self.samples = [s]
+            else:
+                s = demos.motion_sample()
+            self.state.feed(s)
+            self.query_one("#dm-art", Static).update(art_text(demos.motion_art(s, self.state)))
+        elif self.dname == "speakers":
+            sec = self.app.section("audio") if self.app.capture else sections.audio_section()
+            tb = next((t for t in (sec or {}).get("tables", []) if t["title"].startswith("Speakers")), None)
+            t = self.query_one("#dm-table", DataTable)
+            if tb:
+                set_columns(t, tb["columns"])
+                fill(t, [tuple(fmt(c) for c in r) for r in tb["rows"]])
+            self.query_one("#dm-result", Static).update((sec or {}).get("headline", "").replace("\n", "   ·   "))
+
+    def action_zero(self):
+        if self.state:
+            self.state.reset()
+            self.app.notify("level and heading re-zeroed")
+
+    def action_stop(self):
+        from . import demos
+        if not self.running and not (self.proc and self.proc.poll() is None):
+            return
+        self.running = False
+        if getattr(self, "_timer", None):
+            self._timer.stop()
+        if self.proc is not None:
+            demo = demos.get(self.dname)
+            self.run_stop(demo)
+        self.head("stopped")
+
+    @work(thread=True, group="demo-stop")
+    def run_stop(self, demo):
+        from . import demos
+        demos.stop(demo, self.proc)
+
+    def action_back(self):
+        self.action_stop()
+        self.app.sub_title = self._prev_sub
+        self.app.pop_screen()
+
+
+
 class EditScreen(ModalScreen):
     def __init__(self, row):
         super().__init__()
@@ -267,6 +494,13 @@ class Dash(App):
     DataTable.auto { height: auto; max-height: 60; margin: 0 1 1 1; }
     .t-title { color: $accent; text-style: bold; margin: 0 1; }
     #d-head { padding: 0 2; height: auto; }
+    #dh-head, #dm-head { padding: 0 2; height: auto; }
+    #dh-list { height: 1fr; margin: 1 1; }
+    #dh-what, #dm-what, #dm-result { padding: 0 2; height: auto; color: $text; }
+    #dm-what { color: $text-muted; margin: 1 0; }
+    #dm-art { padding: 0 1; height: auto; color: $accent; }
+    #dm-table { height: auto; margin: 1 1; }
+    #dm-log { height: 1fr; margin: 0 1; border: round $panel-lighten-2; }
     #banner { padding: 0 2; height: auto; color: $text-muted; }
     #hint { padding: 0 2; color: $text-muted; }
     #edit { width: 70; height: auto; padding: 1 2; border: thick $accent; background: $surface; }
@@ -300,6 +534,7 @@ class Dash(App):
                 with VerticalScroll():
                     yield Static("Click a tile, or Tab to it and press Enter, for the details. Esc goes back.", id="hint")
                     with Grid(id="overview"):
+                        yield Tile("demos", "Demos")
                         for n in sections.ORDER:
                             yield Tile(n, TITLES.get(n, n))
                         yield Tile("coverage", "Coverage (present / absent)")
@@ -442,7 +677,27 @@ class Dash(App):
         if isinstance(self.screen, Detail):
             self.screen.update()
 
+    def demo_list(self):
+        slow = (self.data or {}).get("slow") or {}
+        if self.capture:
+            return self.capture.get("demos") or slow.get("demos") or []
+        if isinstance(slow.get("demos"), list):
+            return slow["demos"]
+        from . import demos
+        return demos.inventory()
+
     def render_overview(self):
+        try:
+            slow = (self.data or {}).get("slow") or {}
+            ds = slow.get("demos") if isinstance(slow.get("demos"), list) else (self.capture or {}).get("demos")
+            t = self.query_one("#tile-demos", Tile)
+            if ds is None:
+                t.set("press Enter to see the demos", level="off")
+            else:
+                ready = [d["name"] for d in ds if d["level"] == "ok"]
+                t.set("%d ready here\n%s" % (len(ready), ", ".join(ready)[:44]), level="ok" if ready else "off")
+        except Exception:
+            pass
         for n in list(sections.ORDER) + ["coverage"]:
             s = self.section(n)
             try:
@@ -455,7 +710,10 @@ class Dash(App):
             t.set(s["headline"] or "-", self.hist.get("section." + n), s["level"])
 
     def open_detail(self, name):
-        self.push_screen(Detail(name))
+        if name == "demos":
+            self.push_screen(DemosHome())
+        else:
+            self.push_screen(Detail(name))
 
     def render_coverage(self):
         s = self.coverage_section()
@@ -756,7 +1014,23 @@ def screenshots(capture, outdir, prefix, tabs=None, theme="textual-dark", png=Fa
             app.theme = theme
             await pilot.pause(0.5)
             for t in tabs or TABS:
-                if t.startswith("show-"):
+                if t == "demos" or t.startswith("demo-"):
+                    app.push_screen(DemosHome())
+                    await pilot.pause(0.5)
+                    if t.startswith("demo-"):
+                        scr = DemoScreen(t[5:])
+                        app.push_screen(scr)
+                        await pilot.pause(0.4)
+                        scr.action_start()
+                        await pilot.pause(2.5)
+                    name = "%s-%s.svg" % (prefix, t)
+                    app.save_screenshot(name, outdir)
+                    if t.startswith("demo-"):
+                        scr.running = False
+                        app.pop_screen()
+                    app.pop_screen()
+                    await pilot.pause(0.2)
+                elif t.startswith("show-"):
                     app.open_detail(t[5:])
                     await pilot.pause(0.6)
                     name = "%s-%s.svg" % (prefix, t)

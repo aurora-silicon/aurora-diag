@@ -1,5 +1,5 @@
 pkgname=aurora-diag
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 pkgdesc='Bring-up diagnostics and regression checks for Apple silicon Macs (development only)'
 arch=('any')

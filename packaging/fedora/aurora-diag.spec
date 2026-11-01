@@ -1,6 +1,6 @@
 %global commit @COMMIT@
 Name: aurora-diag
-Version: 0.3.0
+Version: 0.4.0
 Release: 1%{?dist}
 Summary: Bring-up diagnostics for Apple silicon Macs (development only)
 License: MIT
@@ -44,6 +44,11 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_datadir}/applications/org.aurorasilicon.Diag.desktop
 
 %changelog
+* Sun Nov 01 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.4.0-1
+- Demos home: motion (spirit level, horizon, compass), speaker protection,
+  AVE/AVD benches vs macOS, ANE classify, GPU, aurora-try camera, captions,
+  mic denoise, photos, upscale; `aurora-diag demo`.
+
 * Sun Nov 01 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.3.0-1
 - Thirteen categories with live drill-downs: health, thermal, CPU, GPU,
   memory, display, radio, storage, power, audio, engines, sensors, system.
