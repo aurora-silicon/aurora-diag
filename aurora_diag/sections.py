@@ -406,16 +406,24 @@ def gpu(slow=None):
     st = {r["attr"].split("/", 1)[1]: r["value"] for r in rs if r["attr"].startswith("agx_stats/") or r["attr"].startswith("agx_stats.")} or \
         {r["id"].split("agx_stats.", 1)[1]: r["value"] for r in rs if "agx_stats." in r["id"]}
     hz = st.get("achieved_frequency_hz")
+    pstate_hz = next((r["value"] for r in rs if r["attr"] == "pstate_hz"), None)
+    util_idle = next((r["value"] for r in rs if r["attr"] == "util_idle"), None)
     if isinstance(hz, (int, float)):
         items.append(item("frequency", "ok", "%.0f MHz achieved, %s MHz requested, pstate %s" % (
             hz / 1e6, (st.get("requested_frequency_hz") or 0) / 1e6 if isinstance(st.get("requested_frequency_hz"), (int, float)) else "?", st.get("pstate"))))
     elif freq:
         items.append(item("frequency", "ok", "devfreq " + ", ".join("%s %s" % (f[0], f[1]) for f in freq)))
+    elif isinstance(pstate_hz, (int, float)):
+        items.append(item("frequency", "ok", "%.0f MHz requested (pstate %s of the device-tree operating points); achieved clock not exposed" % (
+            pstate_hz / 1e6, st.get("pstate"))))
     else:
         items.append(item("frequency", "absent", "not exposed: agx_stats achieved_frequency_hz=%s, pstate_status=%s, and no devfreq device" % (
             st.get("achieved_frequency_hz", "missing"), st.get("pstate_status", "missing"))))
     if isinstance(util, (int, float)):
         items.append(item("utilisation", "ok", "%s%% busy" % util))
+    elif util_idle:
+        items.append(item("utilisation", "ok", "idle: no firmware utilisation sample right now (agx_stats utilisation_status=%s); "
+                          "it reports while the GPU runs" % util_idle))
     else:
         items.append(item("utilisation", "absent", "not exposed: agx_stats util_device_percent=%s, utilisation_status=%s" % (
             st.get("util_device_percent", "missing"), st.get("utilisation_status", "missing"))))
