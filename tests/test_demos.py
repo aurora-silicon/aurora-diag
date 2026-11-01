@@ -71,5 +71,39 @@ class TestDemos(Base):
         self.assertEqual(demos.gpu_parse("...\nglmark2 Score: 4123\n")["score"], 4123)
 
 
+class TestWhitePoint(Base):
+    def setUp(self):
+        super().setUp()
+        build(self.root)
+        demos.DEMOS = None
+
+    def test_gvariant(self):
+        g = demos._gvariant_props("({'NightLightActive': <false>, 'Temperature': <uint32 5600>, "
+                                  "'LightLevel': <214.40209899999999>, 'LightLevelUnit': <'lux'>},)")
+        self.assertEqual(g, {"NightLightActive": False, "Temperature": 5600, "LightLevel": 214.402099, "LightLevelUnit": "lux"})
+
+    def test_model_and_factors(self):
+        self.assertAlmostEqual(demos.white_point_model(6500, 300), 6500)
+        self.assertEqual(demos.white_point_model(2700, 300), 5000)       # clamped
+        self.assertAlmostEqual(demos.white_point_model(2700, 2), 6500)   # faded out in the dark
+        k = demos.white_point_model(5000, 300)
+        self.assertTrue(5600 < k < 5800)                                  # half the shift in mired
+        self.assertEqual([round(x, 3) for x in demos.blackbody(6500)], [1.0, 1.0, 1.0])
+        r, g, b = demos.blackbody(5000)
+        self.assertTrue(r == 1.0 and b < g < 1.0)
+
+    def test_probe_degrades(self):
+        lvl, why = demos.whitepoint_probe()
+        self.assertEqual(lvl, "absent")
+        w(self.root, "/sys/bus/iio/devices/iio:device0/in_cct_input", "5100.5\n")
+        lvl, why = demos.whitepoint_probe()
+        self.assertEqual(lvl, "ok")
+        self.assertIn("5100", why)
+        s = demos.whitepoint_sample()
+        lines = demos.whitepoint_plain(demos.whitepoint_art(s, demos.WhitePointState()))
+        self.assertTrue(any("colour 5100 K" in ln for ln in lines))
+        self.assertTrue(any("absent:" in ln for ln in lines))
+
+
 if __name__ == "__main__":
     unittest.main()
