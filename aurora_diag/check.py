@@ -65,6 +65,10 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
                 kind = lambda c: re.sub(r"\d+", "N", c)
                 short = Counter(kind(c) for c in b.get("class_devices", []) if not plugged.match(c)) - \
                     Counter(kind(c) for c in s.get("class_devices") or [] if not plugged.match(c))
+                # Everything below a USB host controller (disks, HID, its buses while a
+                # dock is attached) is what is plugged in; only the binding is compared.
+                if short and (s.get("block") == "usb" or re.search(r"dwc3|xhci", s.get("driver") or "")):
+                    short = None
                 if short:
                     lost = sorted(c for c in set(b.get("class_devices", [])) - set(s.get("class_devices") or [])
                                   if kind(c) in short)
