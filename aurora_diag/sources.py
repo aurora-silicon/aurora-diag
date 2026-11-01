@@ -206,7 +206,7 @@ def iio():
             label = None
             if "illuminance" in f:
                 unit, label = "lux", "ambient light"
-            elif "_cct" in f:
+            elif "_cct" in f or "colortemp" in f:
                 unit, label = "K", "colour temperature"
             elif "anglvel" in f:
                 unit, label = ("rad/s" if f.endswith("_raw") else None), "gyroscope"
