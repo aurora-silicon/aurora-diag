@@ -22,6 +22,12 @@ SCHEMA = "aurora-diag/snapshot"
 SCHEMA_VERSION = 1
 
 
+def sensor_id(name):
+    """Channel ids that survive driver renames: the ALS colour temperature
+    moved from in_cct_input to the documented in_colortemp_input."""
+    return re.sub(r"/in_cct_(input|raw)$", r"/in_colortemp_\1", name)
+
+
 def _sensor_ids():
     """Every hwmon/iio/thermal channel by stable name (label if any)."""
     out = []
@@ -40,7 +46,7 @@ def _sensor_ids():
             name = sysfs.read(p + "/name") or d
             for f in sysfs.listdir(p):
                 if f.startswith("in_") and (f.endswith("_raw") or f.endswith("_input")):
-                    out.append("iio/%s/%s" % (name, f))
+                    out.append(sensor_id("iio/%s/%s" % (name, f)))
     for z in sysfs.listdir("/sys/class/thermal"):
         if z.startswith("thermal_zone"):
             out.append("thermal/%s" % (sysfs.read("/sys/class/thermal/%s/type" % z) or z))
@@ -207,8 +213,9 @@ def diff(a, b):
     for k in sorted(set(ca.get("dt_ladders", {})) | set(cb.get("dt_ladders", {}))):
         if ca.get("dt_ladders", {}).get(k) != cb.get("dt_ladders", {}).get(k):
             _change(out, "change", "clocks", "ladder " + k, ca.get("dt_ladders", {}).get(k), cb.get("dt_ladders", {}).get(k))
-    lost = sorted(set(a.get("sensors", [])) - set(b.get("sensors", [])))
-    new = sorted(set(b.get("sensors", [])) - set(a.get("sensors", [])))
+    sa_, sb_ = {sensor_id(x) for x in a.get("sensors", [])}, {sensor_id(x) for x in b.get("sensors", [])}
+    lost = sorted(sa_ - sb_)
+    new = sorted(sb_ - sa_)
     if lost:
         _change(out, "regression", "sensors", "missing", lost, None, "%d channels gone" % len(lost))
     if new:

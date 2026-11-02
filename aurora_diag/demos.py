@@ -157,6 +157,8 @@ def motion_sample():
     if als:
         s["lux"] = sysfs.read_float(als + "/in_illuminance_input")
         s["cct"] = sysfs.read_float(als + "/in_colortemp_input")
+        if s["cct"] is None:
+            s["cct"] = sysfs.read_float(als + "/in_cct_input")   # before the documented colortemp ABI
     return s
 
 
@@ -812,12 +814,13 @@ def mired(k):
 
 def white_point_model(ambient_k, lux):
     """What the daemons should choose: half the ambient shift in mired from
-    6500 K, clamped to 5000-6500 K, faded out between 50 and 5 lux."""
+    6500 K, clamped to 5000-6500 K; no adaptation at 10 lux or less, full
+    strength from 15 lux, linear in between (macOS's constants)."""
     if not ambient_k or lux is None:
         return None
     m = mired(6500) + 0.5 * (mired(ambient_k) - mired(6500))
     k = min(6500.0, max(5000.0, 1e6 / m))
-    w = min(1.0, max(0.0, (lux - 5.0) / 45.0))
+    w = min(1.0, max(0.0, (lux - 10.0) / 5.0))
     return 6500.0 + (k - 6500.0) * w
 
 
@@ -916,7 +919,8 @@ def whitepoint_set(on):
     val = "true" if on else "false"
     rc, _ = sections._run(["gsettings", "set", GSD_SCHEMA, GSD_KEY, val], user=u, timeout=5)
     if rc != 0:
-        rc, _ = sections._run(["kwriteconfig6", "--file", "kwinrc", "--group", "NightColor", "--key", "AmbientWhitePoint", val],
+        # --notify: KWin's config watcher only sees changes announced over D-Bus.
+        rc, _ = sections._run(["kwriteconfig6", "--notify", "--file", "kwinrc", "--group", "NightColor", "--key", "AmbientWhitePoint", val],
                               user=u, timeout=5)
     after = whitepoint_setting()
     log.event("set", kind="desktop-setting", path="ambient-white-point", original=before, new=on, readback=after, user=u.pw_name)
@@ -957,7 +961,7 @@ def whitepoint_art(s, st):
               ("   ambient choice %s" % k(s.get("chosen_k")), ""), ("   night light %s" % yn(s.get("night_light")), "")])
     L.append([("  Adaptation      ", "bold"), ("setting %s" % {True: "ON", False: "off", None: "not present"}[s.get("enabled")], "bold"),
               ("   available %s   active %s" % (yn(s.get("available")), yn(s.get("active"))), "")])
-    why = "model: half the ambient shift in mired, 5000-6500 K, fades out from 50 to 5 lux, 10 s median, 1 mired/s; night light wins"
+    why = "model: half the ambient shift in mired, 5000-6500 K, off at 10 lux or less, full from 15 lux, 10 s median, 2 s toggle / 5 s ambient fades; night light wins"
     if s.get("model_k"):
         L.append([("  Model expects   ", "bold"), ("%s for %s at %s lux" % (k(s["model_k"]), k(s.get("cct")), "%.0f" % (s.get("lux") or 0)), ""),
                   ("   (%s)" % why, "dim")])

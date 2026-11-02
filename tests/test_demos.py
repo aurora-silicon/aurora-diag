@@ -85,7 +85,9 @@ class TestWhitePoint(Base):
     def test_model_and_factors(self):
         self.assertAlmostEqual(demos.white_point_model(6500, 300), 6500)
         self.assertEqual(demos.white_point_model(2700, 300), 5000)       # clamped
-        self.assertAlmostEqual(demos.white_point_model(2700, 2), 6500)   # faded out in the dark
+        self.assertAlmostEqual(demos.white_point_model(2700, 10), 6500)  # off at 10 lux or less
+        self.assertAlmostEqual(demos.white_point_model(2700, 12.5), 5750)  # half way between 10 and 15 lux
+        self.assertEqual(demos.white_point_model(2700, 15), 5000)       # full strength from 15 lux
         k = demos.white_point_model(5000, 300)
         self.assertTrue(5600 < k < 5800)                                  # half the shift in mired
         self.assertEqual([round(x, 3) for x in demos.blackbody(6500)], [1.0, 1.0, 1.0])

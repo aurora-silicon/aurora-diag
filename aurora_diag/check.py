@@ -126,7 +126,7 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
     if base:
         cur, err = timed(snapshot._sensor_ids, timeout)
         if not err:
-            lost = sorted(set(base.get("sensors", [])) - set(cur))
+            lost = sorted({snapshot.sensor_id(x) for x in base.get("sensors", [])} - set(cur))
             out.append(_r("sensors", "channels", "fail" if lost else "pass",
                           ("%d missing: %s" % (len(lost), ", ".join(lost[:5]))) if lost else "%d channels, none missing" % len(cur),
                           missing=lost))

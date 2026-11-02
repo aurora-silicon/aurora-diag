@@ -257,3 +257,19 @@ class TestKnownWarnings(Base):
         known = [r for r in res2["checks"] if r["reason"].startswith("known in the baseline")]
         self.assertEqual(len(known), len([w for w in warns if not w.startswith("sensors/")]) or len(known))
         self.assertFalse(any(r["level"] == "warn" and "%s/%s" % (r["group"], r["name"]) in warns for r in res2["checks"]))
+
+
+class TestColourTemperatureABI(Base):
+    def test_either_name(self):
+        build(self.root)
+        d = "/sys/bus/iio/devices/iio:device0"
+        w(self.root, d + "/in_cct_input", "5100\n")
+        s = sections.sensors()
+        self.assertEqual(next(i for i in s["items"] if i["key"] == "colour temperature")["level"], "ok")
+        w(self.root, d + "/in_colortemp_input", "5200\n")
+        s = sections.sensors()
+        self.assertIn("5200", next(i for i in s["items"] if i["key"] == "colour temperature")["detail"])
+        self.assertEqual(snapshot.sensor_id("iio/aop-sensors-als/in_cct_input"), "iio/aop-sensors-als/in_colortemp_input")
+        a = {"kernel": {}, "firmware": {}, "subsystems": {}, "sensors": ["iio/aop-sensors-als/in_cct_input"]}
+        b = {"kernel": {}, "firmware": {}, "subsystems": {}, "sensors": ["iio/aop-sensors-als/in_colortemp_input"]}
+        self.assertFalse([c for c in snapshot.diff(a, b) if c["section"] == "sensors"])
