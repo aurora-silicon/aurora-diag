@@ -110,13 +110,20 @@ def text(rep):
         _w(L, "probe", an["error"])
     elif not an.get("devices"):
         _w(L, "devices", "no ANE accelerator device exposed")
+    for n in an.get("dt_nodes", []):
+        _w(L, n["path"], "status %s, driver %s, generation %s, compatible %s" %
+           (n["status"], n["driver"] or "unbound", n["generation"] or "unknown", ", ".join(n["compatible"])))
     for d in an.get("devices", []):
         _w(L, d["node"], "%s, %s" % (d["driver"], d["generation"] or "unknown"))
-        for key in ("firmware_version", "firmware_source", "client_count", "clients_complete", "performance_level",
+        for key in ("dt_node", "dt_status", "compatible", "firmware_version", "firmware_source", "client_count", "clients_complete", "performance_level", "memory_vote", "performance_error",
                     "power_state", "wedged", "error_counters", "counters", "last_benchmark"):
             _w(L, key, d[key], 4)
     if an.get("benchmark_error"):
         _w(L, "last benchmark", an["benchmark_error"])
+    if not an.get("error"):
+        for c in ane.checks(an):
+            if c["level"] != "pass":
+                _w(L, c["level"], c["reason"])
     L.append("GPU (kernel)")
     for g in rep["gpu"]["devices"]:
         kd = g.get("kernel_driver") or {}

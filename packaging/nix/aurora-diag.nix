@@ -19,6 +19,12 @@ stdenvNoCC.mkDerivation {
       --prefix PATH : ${lib.makeBinPath [ alsa-utils glib vulkan-tools mesa-demos ]} \
       --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib:${lib.makeLibraryPath [ libglvnd ]}
   '';
+  doInstallCheck = true;
+  installCheckPhase = ''
+    mkdir -p "$TMPDIR/ane-empty-root"
+    AURORA_DIAG_ROOT="$TMPDIR/ane-empty-root" $out/bin/aurora-diag ane --json > ane-installed.json
+    ${py.interpreter} -c 'import json; d=json.load(open("ane-installed.json")); assert d["devices"] == [] and d["dt_nodes"] == []; assert d["checks"][0]["level"] == "warn"'
+  '';
   meta = {
     description = "Bring-up diagnostics and regression checks for Apple silicon Macs (development only)";
     license = lib.licenses.mit;
