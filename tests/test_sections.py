@@ -296,11 +296,19 @@ class TestGpuStats(Base):
         self.assertEqual(items["frequency"]["level"], "off")
         self.assertIn("not available on this GPU", items["frequency"]["detail"])
 
-    def test_g17_firmware_unsupported_pstate(self):
-        items = self.gpu("utilisation_status valid\nutil_device_percent 100\npstate_status unsupported\npstate unsupported\n"
+    def test_g17_pstate_unavailable(self):
+        items = self.gpu("utilisation_status valid\nutil_device_percent 100\npstate_status unavailable\npstate unsupported\n"
                          "requested_frequency_hz unsupported\nachieved_frequency_hz unsupported\n")
         self.assertEqual(items["frequency"]["level"], "off")
-        self.assertIn("pstate_status=unsupported", items["frequency"]["detail"])
+        self.assertIn("pstate_status=unavailable", items["frequency"]["detail"])
+
+    def test_g17_valid_pstate_is_not_mapped_to_the_dt_table(self):
+        # The G17 selector does not name a firmware table, so no MHz from the DT.
+        items = self.gpu("utilisation_status valid\nutil_device_percent 40\npstate_status valid\npstate 1\n"
+                         "requested_frequency_hz unsupported\nachieved_frequency_hz unsupported\n")
+        self.assertEqual(items["frequency"]["level"], "off")
+        self.assertIn("logical pstate 1", items["frequency"]["detail"])
+        self.assertNotIn("MHz", items["frequency"]["detail"])
 
     def test_g14_kernel_requested_frequency(self):
         items = self.gpu("busy_ns 1000\njobs 5\npstate 2\npower_mw 0\nutil1 0\nrequested_frequency_hz 612000000\n")

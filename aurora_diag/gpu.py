@@ -342,9 +342,13 @@ def readings(live_only=False):
                                             "firmware device utilisation", p, name))
                     elif kv.get("utilisation_status") in ("stale", "unavailable"):
                         out.append(_reading(pre + ".util_idle", "util_idle", kv["utilisation_status"], None,
-                                            "no recent firmware utilisation sample (the GPU is idle)", p, name))
+                                            "no recent firmware utilisation sample (the GPU is idle or power-gated)", p, name))
                     ps = kv.get("pstate")
-                    if isinstance(ps, int) and not isinstance(kv.get("achieved_frequency_hz"), (int, float)):
+                    # Only the G13/G14 pstate indexes the DT table. G16S/G17P
+                    # (they print pstate_status) report a logical selector that
+                    # does not say which firmware table it is in.
+                    if isinstance(ps, int) and "pstate_status" not in kv and \
+                            not isinstance(kv.get("achieved_frequency_hz"), (int, float)):
                         opps = opp_table_hz(dev["path"])
                         if 0 <= ps < len(opps):
                             out.append(_reading(pre + ".pstate_hz", "pstate_hz", opps[ps], "Hz",

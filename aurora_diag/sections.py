@@ -419,10 +419,12 @@ def gpu(slow=None):
     elif isinstance(pstate_hz, (int, float)):
         items.append(item("frequency", "ok", "%.0f MHz requested (pstate %s of the device-tree operating points); achieved clock not exposed" % (
             pstate_hz / 1e6, st.get("pstate"))))
-    elif st.get("pstate_status") in ("unsupported", "unavailable") and st.get("achieved_frequency_hz") == "unsupported":
-        # G16S/G17P firmware never reports the GPU pstate or clock (agx_stats says so), so there is nothing to read.
-        items.append(item("frequency", "off", "not available on this GPU: the firmware does not report the GPU clock or pstate "
-                          "(agx_stats pstate_status=%s)" % st.get("pstate_status")))
+    elif "pstate_status" in st and st.get("achieved_frequency_hz") == "unsupported":
+        # G16S/G17P: agx_stats says the firmware reports no GPU clock. The
+        # pstate is a logical selector, shown as it is.
+        ps = ("logical pstate %s" % st.get("pstate")) if st.get("pstate_status") == "valid" else \
+            ("pstate_status=%s" % st.get("pstate_status"))
+        items.append(item("frequency", "off", "not available on this GPU: the firmware does not report the GPU clock (%s)" % ps))
     else:
         items.append(item("frequency", "absent", "not exposed: agx_stats achieved_frequency_hz=%s, pstate_status=%s, and no devfreq device" % (
             st.get("achieved_frequency_hz", "missing"), st.get("pstate_status", "missing"))))
