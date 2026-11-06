@@ -35,6 +35,9 @@ def _permission(path):
     return "Permission denied for %s; request access through the %s group or its ACL from the administrator." % (path, group)
 
 
+NOT_EXPOSED = "is not exposed by this kernel"
+
+
 def _read(path, issues, optional=False):
     """Keep read failures distinct from missing optional kernel ABI files."""
     try:
@@ -45,7 +48,7 @@ def _read(path, issues, optional=False):
             issues.append(_permission(path))
         elif e.errno == errno.ENOENT:
             if not optional:
-                issues.append("%s is not exposed by this kernel; install an Aurora kernel with ANE telemetry enabled." % path)
+                issues.append("%s %s; install an Aurora kernel with ANE telemetry enabled." % (path, NOT_EXPOSED))
         else:
             issues.append("Cannot read %s (%s); inspect the ANE kernel log and retry after resolving the driver error." % (path, e.strerror or "I/O error"))
     return None
@@ -386,10 +389,14 @@ def checks(data):
         out.append(row(prefix, "pass" if bound and d["node_present"] else "fail",
                        ("driver %s, generation %s" % (d["driver"], d["generation"] or "unknown")) if bound and d["node_present"]
                        else "ANE driver or accelerator node is missing; install the Aurora ANE kernel driver and its accelerator udev rules.", device=prefix))
+        # A file the kernel does not have is missing telemetry, not an access
+        # problem: it goes in the telemetry row below.
+        absent = [r.split()[0].rsplit("/", 1)[-1] for r in d.get("issues", []) if NOT_EXPOSED in r]
         for reason in d.get("issues", []):
-            out.append(row(prefix + " access", "warn", reason, device=prefix))
+            if NOT_EXPOSED not in reason:
+                out.append(row(prefix + " access", "warn", reason, device=prefix))
         missing = [k for k in ("generation", "firmware_version", "client_count", "power_state")
-                   if d[k] is None]
+                   if d[k] is None] + absent
         if not d["clients_complete"]:
             missing.append("complete client visibility")
         out.append(row(prefix + " telemetry", "warn" if missing else "pass",
