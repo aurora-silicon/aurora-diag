@@ -1,6 +1,6 @@
 %global commit @COMMIT@
 Name: aurora-diag
-Version: 0.2.1
+Version: 0.4.0
 Release: 1%{?dist}
 Summary: Bring-up diagnostics for Apple silicon Macs (development only)
 License: MIT
@@ -13,6 +13,9 @@ Recommends: alsa-utils
 Recommends: python3-textual
 Recommends: vulkan-tools
 Recommends: mesa-demos
+Recommends: iw
+Recommends: smartmontools
+Recommends: bluez
 
 %description
 Shows every sensor, clock, hardware block, service and GPU API (Vulkan,
@@ -41,8 +44,17 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_datadir}/applications/org.aurorasilicon.Diag.desktop
 
 %changelog
-* Sat Oct 31 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.2.1-1
-- Read-only ANE DT, binding and performance diagnostics with generation fixtures.
+* Sun Nov 01 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.4.0-1
+- Demos home: motion (spirit level, horizon, compass), speaker protection,
+  AVE/AVD benches vs macOS, ANE classify, GPU, aurora-try camera, captions,
+  mic denoise, photos, upscale; `aurora-diag demo`.
+
+* Sun Nov 01 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.3.0-1
+- Thirteen categories with live drill-downs: health, thermal, CPU, GPU,
+  memory, display, radio, storage, power, audio, engines, sensors, system.
+- Display: KMS properties, EDID, DCP attributes, VRR, HDR, DCP per connector.
+- Motion sensors, lid and jack switches; absent items say why.
+- show and coverage commands; inventory in check, snapshot and diff.
 
 * Fri Oct 30 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.2.0-1
 - GPU, Vulkan, GL/GLES, compliance, clocks, subsystems, services.

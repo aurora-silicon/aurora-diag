@@ -13,14 +13,11 @@ Every probe runs under a deadline (probe.timed), so a hung driver shows
 as a failed probe instead of a stalled run.
 """
 
-import json
 import os
 import re
-from collections import Counter
-import sys
 import time
 
-from . import ane, gpu, services, snapshot, subsystems, sysfs
+from . import ane, gpu, identity, services, snapshot, subsystems, sysfs
 from .probe import timed
 
 SCHEMA = "aurora-diag/check"
@@ -34,7 +31,7 @@ def _r(group, name, level, reason, **extra):
     return d
 
 
-def run(machine, only=None, expect=None, api=True, timeout=8.0):
+def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
     t0 = time.monotonic()
     out = []
     base = snapshot.load(expect) if expect else None
@@ -58,20 +55,13 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
                 lvl = "pass"  # no driver for it in the baseline either: known gap
                 why = "no driver (same as baseline)"
             if b:
-                # Kernel numbering (i2c-2 vs i2c-1, card0 vs card1, input7 vs input9) changes
-                # between boots and kernels. A device only counts as lost when fewer of its
-                # kind (name without the trailing number) exist now than in the baseline.
-                # Devices that exist only while something is plugged in (a Type-C partner,
-                # cable or plug) follow the desk, not the kernel, so they are not compared.
-                plugged = re.compile(r"^typec/port\d+-(partner|cable|plug\d*)$")
-                kind = lambda c: re.sub(r"\d+", "N", c)
-                short = Counter(kind(c) for c in b.get("class_devices", []) if not plugged.match(c)) - \
-                    Counter(kind(c) for c in s.get("class_devices") or [] if not plugged.match(c))
-                if short:
-                    lost = sorted(c for c in set(b.get("class_devices", [])) - set(s.get("class_devices") or [])
-                                  if kind(c) in short)
+                lost, _ = identity.class_delta(b, s, ignore_plugged=True)
+                # USB descendants follow attached peripherals; compare binding only.
+                if s.get("block") == "usb" or re.search(r"dwc3|xhci", s.get("driver") or ""):
+                    lost = []
+                if lost:
                     lvl = "fail"
-                    why = "lost %s; %s" % (", ".join(lost or sorted(short)), why)
+                    why = "lost %s; %s" % (", ".join(lost), why)
         out.append(_r("subsys", "%s %s" % (s.get("title") or s["block"], s["name"]), lvl, why, node=s["node"],
                       infra=s["kind"] != "block"))
     if base:
@@ -95,12 +85,23 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
                 lvl = "pass"
             else:
                 lvl = "warn"
+        if services.idle_activatable(u):
+            lvl, why = "pass", "on-demand unit, idle and activatable"
         if base:
             was = base.get("services", {}).get(u["unit"])
-            if was == "active" and u["active"] != "active":
-                lvl, why = "fail", "active in the baseline, now " + u["active"]
+            was_ok = was == "active" or services.snapshot_idle(u["unit"], was, base.get("service_details", {}))
+            if was_ok and u["active"] != "active":
+                if services.idle_activatable(u):
+                    lvl, why = "pass", "on-demand unit, idle and activatable (active in the baseline)"
+                else:
+                    lvl, why = "fail", "active or activatable in the baseline, now " + u["active"]
         if lvl != "skip" or base:
             out.append(_r("service", u["unit"], lvl, why))
+    if base:
+        seen_units = {u["unit"] for u in units}
+        for name, was in base.get("services", {}).items():
+            if name not in seen_units and (was == "active" or services.snapshot_idle(name, was, base.get("service_details", {}))):
+                out.append(_r("service", name, "fail", "active or activatable in the baseline, unit gone now"))
 
     sg, err = timed(services.speakerguardd, timeout)
     if not err and sg.get("service") is not None:
@@ -125,7 +126,7 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
     if base:
         cur, err = timed(snapshot._sensor_ids, timeout)
         if not err:
-            lost = sorted(set(base.get("sensors", [])) - set(cur))
+            lost = sorted({snapshot.sensor_id(x) for x in base.get("sensors", [])} - set(cur))
             out.append(_r("sensors", "channels", "fail" if lost else "pass",
                           ("%d missing: %s" % (len(lost), ", ".join(lost[:5]))) if lost else "%d channels, none missing" % len(cur),
                           missing=lost))
@@ -183,6 +184,8 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
                     b = ((base.get("gpu") or {}).get("gl") or {}).get(apiname) or {}
                     if b.get("extension_count") and info["extension_count"] < b["extension_count"]:
                         lvl, why = "fail", "extensions dropped from %d: %s" % (b["extension_count"], why)
+                    elif lvl == "warn" and b.get("path") == info["path"]:
+                        lvl, why = "pass", "same %s path as the baseline: %s" % (info["path"], why)
                 out.append(_r("gpu", apiname, lvl, why))
 
     an, err = timed(ane.collect, timeout)
@@ -197,9 +200,25 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
                 if was.get("driver") and (not now or not now.get("driver")):
                     out.append(_r("ane", name, "fail", "ANE device/driver present in baseline is missing"))
 
+    if secs is None:
+        from . import sections
+        secs, err = timed(lambda: sections.collect([n for n in sections.ORDER if n != "health"]), 30)
+        if err:
+            out.append(_r("inventory", "probe", "fail", "inventory " + err))
+            secs = {}
+    out.extend(inventory_rows(secs, base))
+
+    if base and base.get("warnings") is not None:
+        known = set(base["warnings"])
+        for r in out:
+            if r["level"] == "warn" and "%s/%s" % (r["group"], r["name"]) in known:
+                r["level"], r["reason"] = "pass", "known in the baseline: " + r["reason"]
+
     if only:
         want = [w.strip().lower() for w in only.split(",") if w.strip()]
-        out = [r for r in out if any(w in r["group"].lower() or w in r["name"].lower() for w in want)]
+        # Category rows match by their group or category name (--only display, --only radio).
+        out = [r for r in out if any(w in r["group"].lower() or (w == r.get("section") if r["group"] == "inventory"
+                                                                  else w in r["name"].lower()) for w in want)]
     worst = max([LEVELS[r["level"]] for r in out] + [0])
     return {"schema": SCHEMA, "version": SCHEMA_VERSION,
             "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -207,6 +226,38 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0):
             "baseline": expect, "result": {0: "pass", 1: "warn", 2: "fail"}[worst], "exit": worst,
             "counts": {k: sum(1 for r in out if r["level"] == k) for k in ("pass", "warn", "fail", "skip")},
             "checks": out, "elapsed_s": round(time.monotonic() - t0, 2)}
+
+
+# Items whose presence follows what is plugged in, not the kernel.
+VOLATILE = re.compile(r"^(display/(DP|HDMI|USB|DSI)-|system/(USB4|Type-C)|power/external power|radio/other)")
+
+
+def inventory_rows(secs, base=None):
+    """One row per category item (sections.py): ok passes, warn warns, a
+    fail fails, absent and off are skipped with their reason. With a
+    baseline, an item that was ok there and is absent or failing now fails,
+    and a warning the baseline shares passes as a known gap."""
+    from . import sections
+    out = []
+    bitems = (base or {}).get("inventory_items") or {}
+    seen = set()
+    for row in sections.coverage(secs):
+        key = "%s/%s" % (row["section"], row["item"])
+        seen.add(key)
+        lvl = {"ok": "pass", "warn": "warn", "fail": "fail"}.get(row["level"], "skip")
+        why = ("%s: %s" % (row["level"], row["detail"])) if lvl == "skip" else row["detail"]
+        if base is not None and key in bitems:
+            b = bitems[key]
+            if b == "ok" and row["level"] in ("absent", "fail", "warn") and not VOLATILE.match(key):
+                lvl, why = ("fail" if row["level"] != "warn" else "warn"), "ok in the baseline, now %s: %s" % (row["level"], row["detail"])
+            elif lvl in ("warn", "fail") and b == row["level"]:
+                lvl, why = "pass", "same as baseline: " + row["detail"]
+        out.append(_r("inventory", key, lvl, why[:300], section=row["section"]))
+    if base is not None:
+        for key, b in sorted(bitems.items()):
+            if key not in seen and b == "ok" and not VOLATILE.match(key) and key.split("/")[0] in secs:
+                out.append(_r("inventory", key, "fail", "ok in the baseline, gone now", section=key.split("/")[0]))
+    return out
 
 
 def _v(s):

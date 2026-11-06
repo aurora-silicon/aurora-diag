@@ -19,7 +19,7 @@ import re
 import shutil
 import subprocess
 
-from . import sysfs
+from . import identity, sysfs
 
 DT_BASE = "/sys/firmware/devicetree/base"
 
@@ -234,6 +234,7 @@ def subsystems():
                 rec["deferred"] = defer[dname]
             kids = [(c, n, dn) for (c, n, real, dn) in classes if real.startswith(dev + "/")]
             rec["class_devices"] = ["%s/%s" % (c, n) for c, n, _ in kids]
+            rec["class_device_ids"] = identity.collect(classes, dev)
             rec["dev_nodes"] = sorted({dn for _, _, dn in kids if dn})
             rec["last_problem"] = _last(errs, [dname])
             rec["last_warning"] = _last(warns, [dname])
@@ -276,6 +277,7 @@ def pci_functions(classes, errs):
                "compatible": ["pci%s,%s" % ((sysfs.read(d + "/vendor") or "")[2:], (sysfs.read(d + "/device") or "")[2:])],
                "dt_status": "okay", "device": f, "sysfs": real, "driver": drv,
                "class_devices": ["%s/%s" % (c, n) for c, n, _ in kids],
+               "class_device_ids": identity.collect(classes, real),
                "dev_nodes": sorted({dn for _, _, dn in kids if dn}),
                "last_problem": _last(errs, [f, drv] if drv else [f])}
         rec["state"] = _state(rec)

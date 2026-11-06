@@ -2,6 +2,7 @@
 """Deterministic version of scrolltest.py, including ANE and vs macOS."""
 
 import copy
+import json
 import unittest
 
 try:
@@ -78,3 +79,17 @@ class TestDashboardScroll(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRedact(unittest.TestCase):
+    def test_redact_ssid_mac_host(self):
+        from aurora_diag import dashboard
+        cap = {"host": "labhost", "sections": {"radio": {"headline": "MyLabNet -50 dBm", "tables": [
+            {"title": "Wi-Fi wlan0", "columns": ["field", "value"], "rows": [["SSID", "MyLabNet"], ["bss", "aa:bb:cc:dd:ee:ff"]]}]}},
+               "log": ["labhost says hi"]}
+        r = dashboard.redact(cap, "mbp")
+        text = json.dumps(r)
+        self.assertNotIn("MyLabNet", text)
+        self.assertNotIn("aa:bb:cc", text)
+        self.assertNotIn("labhost", text)
+        self.assertIn("<wifi> -50 dBm", text)

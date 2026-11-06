@@ -369,7 +369,7 @@ def checks(data):
                 fix += " with bootloader firmware TEXT/DATA reservations and a Linux ownership provider where required"
             out.append(row(n["path"], "fail", "ANE DT status is %s; %s." % (n["status"], fix)))
         elif not n["driver_bound"]:
-            fix = "install kernel-aurora (Fedora), linux-aurora (ALARM), or nixos-aurora linux-asahi with the ANE driver for %s and inspect probe errors for its DART and power-domain dependencies" % (n["generation"] or "this SoC")
+            fix = "install kernel-aurora (Fedora), linux-aurora (ALARM), or the nixos-aurora kernel with the ANE driver for %s and inspect probe errors for its DART and power-domain dependencies" % (n["generation"] or "this SoC")
             if n["generation"] == "H14":
                 fix += " and fetch missing apple/ane firmware with omarchy-ane-firmware-fetch (on NixOS, configure aurora.ane.firmwarePackage and rebuild)"
             elif n["generation"] in ("H16", "H17"):

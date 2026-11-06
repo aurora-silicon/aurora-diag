@@ -55,6 +55,66 @@ Every document an agent parses carries `schema` and `version`. A reader should c
 
 Values that move by themselves (temperatures, power, frequencies right now) are not in a snapshot, so two snapshots of an unchanged machine diff clean.
 
+Snapshots also carry optional identity and activation metadata (schema version 1):
+
+    "subsystems": {"<DT path>": {"class_device_ids": {
+        "<class>/<kernel name>": {"path": "<normalised path relative to this device>", "name": "<name attribute or null>"}
+    }, ...}},
+    "service_details": {"<unit>": {"load", "enabled", "result", "type", "bus_name",
+                                     "bus_activatable", "active_sockets": [...], ...}},
+    "user_service_details": {"<user>/<unit>": {...}}
+
+`diff` and `check --expect` compare class devices by class, relative device path
+and name attribute when both sides carry identities. Allocation IDs are
+normalised, while DT addresses, I2C addresses, DMA channels, ALSA device numbers,
+and connector type/index within a card are preserved. Matching uses counts, so
+losing one of two otherwise identical devices still reports a loss. Raw
+`class_devices` names remain available for display. Old snapshots, or comparisons
+with one old snapshot, use class-specific name normalisation and counts; these
+cannot distinguish devices whose only recorded difference is an allocation ID.
+
+An inactive service is healthy when loaded, unmasked, successfully stopped and
+still activatable: its D-Bus name has an activation registration, or one of its
+triggering sockets is loaded and active. Collection reads unit properties and
+D-Bus registration files; it never starts services. Active-to-idle transitions
+remain informational changes. Failed, missing, masked or no longer activatable
+units still regress. For old snapshots without service metadata, only
+`fprintd.service` has the known D-Bus idle exception; other units remain
+conservative. Live `check --expect` always requires current activation evidence.
+
+Since 0.3.0 a snapshot also carries:
+
+    "inventory": {"<category>": {stable facts: drivers, firmware versions, connectors and their KMS properties,
+                                 the internal panel's EDID name and refresh, DCP nodes, IIO channels, ...}},
+    "inventory_items": {"<category>/<item>": "ok" | "warn" | "fail" | "absent" | "off"},
+    "warnings": ["<group>/<check name>", ...]     (warn rows of a check run at snapshot time)
+
+`check --expect` fails an item that was `ok` and is now `absent` or `fail`, and passes a warning listed in `warnings`.
+
+## category (`aurora-diag show NAME --json`)
+
+    {"name": "cpu", "title": "CPU", "level": "ok" | "warn" | "fail" | "off",
+     "headline": "two short lines", "spark": number | null,
+     "items": [{"key": "accelerometer", "level": "ok" | "warn" | "fail" | "absent" | "off", "detail": "why", ...}],
+     "tables": [{"title", "columns": [...], "rows": [[...], ...]}],
+     "facts": {...}}
+
+`show all --json` wraps them: `{"schema": "aurora-diag/show", "version": 1, "host", "kernel", "sections": {"<name>": {...}}}`. Names: health, thermal, cpu, gpu, memory, display, radio, storage, power, audio, engines, sensors, system (aliases such as `speaker`, `wifi`, `nvme`, `motion` work too).
+
+## demos (`aurora-diag demo --json`, `demo NAME --json`)
+
+    {"schema": "aurora-diag/demos", "version": 1, "host",
+     "demos": [{"name", "title", "kind": "live" | "bench" | "launch", "engine", "what", "uses": ["camera" | "microphone"],
+                "level": "ok" | "warn" | "absent", "detail": "why", "command": [...] | null,
+                "reference": {"value", "unit", "what", "source"} | null}]}
+
+`demo NAME --json` for a quick run prints `{"demo", "exit", "result": {"fps" | "score" | "ms", "bitexact", "label"}, "summary", "reference"}`; for `motion` it prints one JSON line per sample (accel in m/s^2, gyro in deg/s, lid_deg, lux, cct, heading_deg, tilt). Dashboard captures carry `slow.demos` and `motion_samples`.
+
+## coverage (`aurora-diag coverage --json`)
+
+    {"schema": "aurora-diag/coverage", "version": 1, "host", "kernel",
+     "items": [{"section", "item", "level", "detail"}]}
+
 ## diff (`aurora-diag diff --json`)
 
     {"schema": "aurora-diag/diff", "version": 1, "old", "new", "old_kernel", "new_kernel",
@@ -123,7 +183,7 @@ Generic readings use category `ane` and IDs `ane.accelN.<field>`, always `writab
 ```json
 {
   "schema": "aurora-diag/comparison", "version": 1,
-  "source": "j616s-perf-baseline-20261031/COMPARE.md", "captured": "2026-10-31",
+  "source": "macOS idle and ANE measurements on the J616s", "captured": "2026-10-31",
   "os": "macOS 27.0 (26A428)", "machine": "apple,j616s", "machine_matches": true,
   "rows": [{"id": "idle.phpc", "label": "CPU-side heatpipe power", "value": 2.61,
             "unit": "W", "context": "idle.phpc; idle on AC", "linux": 3.64,
@@ -138,11 +198,11 @@ Live metric IDs: `cpu.p.states`, `cpu.p.min`, `cpu.p.max`, `cpu.e.states`, `cpu.
 
 Saved-only metrics: `ane.b1.rate`, `ane.b1.p50`, `ane.b8.rate`, `ane.b8.p50`. They require exactly one result with matching model, fp16 precision, batch, `ok: true`, zero errors if given, and no `available: false`. Batch-8 throughput is images/s and latency is ms per batch. Add-fixture never matches MobileNet. The result's timestamp appears in the row reason; no freshness claim is made.
 
-The baseline export (`aurora_diag/macos_baseline.json`, installed with the module) uses `schema: "aurora-diag/macos-baseline"`, `version: 1`, a `machine` DT compatible, optional `source`/`captured`/`os`, and `metrics` containing unique `id`, `label`, `value`, `unit`, `context`. Only numeric macOS values and their measurement context are exported from COMPARE.md; historical Linux results are not used. Override with `AURORA_DIAG_MACOS_BASELINE`; override paths and the ANE benchmark path honor `AURORA_DIAG_ROOT` in tests.
+The baseline export (`aurora_diag/macos_baseline.json`, installed with the module) uses `schema: "aurora-diag/macos-baseline"`, `version: 1`, a `machine` DT compatible, optional `source`/`captured`/`os`, and `metrics` containing unique `id`, `label`, `value`, `unit`, `context`. Only numeric macOS values and their measurement context are exported; historical Linux results are not used. Override with `AURORA_DIAG_MACOS_BASELINE`; override paths and the ANE benchmark path honor `AURORA_DIAG_ROOT` in tests.
 
 ## dashboard (`tui --dump FILE`)
 
-`schema: "aurora-diag/dashboard"`, `version: 1` adds `slow.ane` and `slow.comparison` with the structures above (or an `error` from a timed-out probe). Both are refreshed every 15 seconds. The Textual ANE and vs macOS panels render these captured values without probing the viewing machine. Older captures may omit both fields. Table cells and trailing rows update in place, preserving scroll offset and cursor where the remaining content permits.
+`schema: "aurora-diag/dashboard"`, `version: 1` carries `sections` (every category, as `show --json` prints it) and `history[].values["section.<name>"]` for the tiles' sparklines. It adds `slow.ane` and `slow.comparison` with the structures above (or an `error` from a timed-out probe). Both are refreshed every 15 seconds. The Textual ANE and vs macOS panels render these captured values without probing the viewing machine. Older captures may omit both fields. Table cells and trailing rows update in place, preserving scroll offset and cursor where the remaining content permits.
 
 ### ANE DT and performance additions (version 1, additive)
 
@@ -155,7 +215,7 @@ null and carries an issue. T8140 is H17. Unknown compatibles stay unknown.
 Top-level `issues` reports tree enumeration errors.
 
 Each accelerator adds `driver_bound`, `dt_node`, `dt_status`, `memory_vote`,
-`performance_error` and `issues`. `performance_level` (0–5 or `unsupported`),
+`performance_error` and `issues`. `performance_level` (0 to 5, or `unsupported`),
 `memory_vote` (average and peak decimal kB/s or `unsupported`) and
 `performance_error` (zero or negative errno) retain the kernel text. They are
 requested performance policy, not measured clocks. Absent optional ABI files
