@@ -310,6 +310,12 @@ class TestGpuStats(Base):
         self.assertIn("logical pstate 1", items["frequency"]["detail"])
         self.assertNotIn("MHz", items["frequency"]["detail"])
 
+    def test_g14_pstate_zero_is_off(self):
+        items = self.gpu("busy_ns 1000\njobs 5\npstate 0\npower_mw 0\nutil1 0\n")
+        self.assertEqual(items["frequency"]["level"], "ok")
+        self.assertIn("off (pstate 0", items["frequency"]["detail"])
+        self.assertNotIn("0 MHz", items["frequency"]["detail"])
+
     def test_g14_kernel_requested_frequency(self):
         items = self.gpu("busy_ns 1000\njobs 5\npstate 2\npower_mw 0\nutil1 0\nrequested_frequency_hz 612000000\n")
         self.assertEqual(items["frequency"]["level"], "ok")

@@ -416,6 +416,9 @@ def gpu(slow=None):
     elif isinstance(st.get("requested_frequency_hz"), (int, float)):
         items.append(item("frequency", "ok", "%.0f MHz requested (pstate %s); achieved clock not exposed" % (
             st["requested_frequency_hz"] / 1e6, st.get("pstate"))))
+    elif pstate_hz == 0:
+        # The first operating point is 0 Hz: the firmware has the GPU off.
+        items.append(item("frequency", "ok", "off (pstate %s, 0 Hz in the device-tree operating points); the GPU is idle" % st.get("pstate")))
     elif isinstance(pstate_hz, (int, float)):
         items.append(item("frequency", "ok", "%.0f MHz requested (pstate %s of the device-tree operating points); achieved clock not exposed" % (
             pstate_hz / 1e6, st.get("pstate"))))
