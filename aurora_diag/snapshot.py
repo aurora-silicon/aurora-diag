@@ -15,11 +15,17 @@ import re
 import socket
 import time
 
-from . import __version__, ane, clocks, gpu, services, subsystems, sysfs
+from . import __version__, ane, clocks, gpu, identity, services, subsystems, sysfs
 from .probe import timed
 
 SCHEMA = "aurora-diag/snapshot"
 SCHEMA_VERSION = 1
+
+
+def sensor_id(name):
+    """Channel ids that survive driver renames: the ALS colour temperature
+    moved from in_cct_input to the documented in_colortemp_input."""
+    return re.sub(r"/in_cct_(input|raw)$", r"/in_colortemp_\1", name)
 
 
 def _sensor_ids():
@@ -40,7 +46,7 @@ def _sensor_ids():
             name = sysfs.read(p + "/name") or d
             for f in sysfs.listdir(p):
                 if f.startswith("in_") and (f.endswith("_raw") or f.endswith("_input")):
-                    out.append("iio/%s/%s" % (name, f))
+                    out.append(sensor_id("iio/%s/%s" % (name, f)))
     for z in sysfs.listdir("/sys/class/thermal"):
         if z.startswith("thermal_zone"):
             out.append("thermal/%s" % (sysfs.read("/sys/class/thermal/%s/type" % z) or z))
@@ -85,9 +91,12 @@ def build(machine, api=True, budget=None):
                                    "driver": s.get("driver"), "level": s["state"]["level"],
                                    "why": s["state"]["why"], "dt_status": s["dt_status"],
                                    "dt_firmware": s.get("dt_firmware"),
-                                   "class_devices": sorted(s.get("class_devices") or [])}
+                                   "class_devices": sorted(s.get("class_devices") or []),
+                                   "class_device_ids": s.get("class_device_ids", {})}
                        for s in subs},
         "services": {u["unit"]: u["active"] for u in svc},
+        "service_details": {u["unit"]: services.activation_details(u) for u in svc},
+        "user_service_details": {"%s/%s" % (u["user"], u["unit"]): services.activation_details(u) for u in users},
         "user_services": {"%s/%s" % (u["user"], u["unit"]): u["active"] for u in users},
         "clocks": {
             "cpu": {p["policy"]: {"ladder_MHz": p["ladder_MHz"], "hw_min_MHz": p["hw_min_MHz"],
@@ -179,21 +188,22 @@ def diff(a, b):
             _change(out, sev, "subsystems", k + " state", x["level"], y["level"], y["why"])
         if x.get("dt_firmware") != y.get("dt_firmware"):
             _change(out, "change", "subsystems", k + " firmware", x.get("dt_firmware"), y.get("dt_firmware"))
-        lost = sorted(set(x["class_devices"]) - set(y["class_devices"]))
-        gained = sorted(set(y["class_devices"]) - set(x["class_devices"]))
-        # Numbered class devices (hidraw3 -> hidraw4) are renames, not losses.
-        strip = lambda l: sorted(re.sub(r"\d+$", "", c) for c in l)
-        if strip(lost) != strip(gained):
-            if lost:
-                _change(out, "regression", "subsystems", k + " class devices", lost, None, "lost")
-            if gained:
-                _change(out, "improvement", "subsystems", k + " class devices", None, gained, "new")
+        lost, gained = identity.class_delta(x, y)
+        if lost:
+            _change(out, "regression", "subsystems", k + " class devices", lost, None, "lost")
+        if gained:
+            _change(out, "improvement", "subsystems", k + " class devices", None, gained, "new")
     for sec in ("services", "user_services"):
         xa, xb = a.get(sec, {}), b.get(sec, {})
+        details_key = "service_details" if sec == "services" else "user_service_details"
         for k in sorted(set(xa) | set(xb)):
-            if xa.get(k) != xb.get(k):
-                sev = "regression" if xa.get(k) == "active" else ("improvement" if xb.get(k) == "active" else "change")
-                _change(out, sev, sec, k, xa.get(k), xb.get(k))
+            was_ok = xa.get(k) == "active" or services.snapshot_idle(k, xa.get(k), a.get(details_key, {}))
+            now_ok = xb.get(k) == "active" or services.snapshot_idle(k, xb.get(k), b.get(details_key, {}))
+            # Metadata can reveal a lost activation source even without a state change.
+            if xa.get(k) != xb.get(k) or was_ok != now_ok:
+                sev = "regression" if was_ok and not now_ok else ("improvement" if now_ok and not was_ok else "change")
+                _change(out, sev, sec, k, xa.get(k), xb.get(k),
+                        "no longer active or activatable" if was_ok and not now_ok else "")
     ca, cb = a.get("clocks", {}), b.get("clocks", {})
     for k in sorted(set(ca.get("cpu", {})) | set(cb.get("cpu", {}))):
         x, y = ca.get("cpu", {}).get(k), cb.get("cpu", {}).get(k)
@@ -203,8 +213,9 @@ def diff(a, b):
     for k in sorted(set(ca.get("dt_ladders", {})) | set(cb.get("dt_ladders", {}))):
         if ca.get("dt_ladders", {}).get(k) != cb.get("dt_ladders", {}).get(k):
             _change(out, "change", "clocks", "ladder " + k, ca.get("dt_ladders", {}).get(k), cb.get("dt_ladders", {}).get(k))
-    lost = sorted(set(a.get("sensors", [])) - set(b.get("sensors", [])))
-    new = sorted(set(b.get("sensors", [])) - set(a.get("sensors", [])))
+    sa_, sb_ = {sensor_id(x) for x in a.get("sensors", [])}, {sensor_id(x) for x in b.get("sensors", [])}
+    lost = sorted(sa_ - sb_)
+    new = sorted(sb_ - sa_)
     if lost:
         _change(out, "regression", "sensors", "missing", lost, None, "%d channels gone" % len(lost))
     if new:

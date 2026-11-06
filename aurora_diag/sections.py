@@ -856,9 +856,10 @@ def sensors(readings=None):
     for r in iio:
         devs.setdefault(r["dev"], []).append(r)
     items = []
-    for kind, rx, unit in (("ambient light", r"illuminance", "lux"), ("colour temperature", r"in_colortemp", "K"),
+    # Colour temperature: the documented in_colortemp channel, else the older in_cct one.
+    for kind, rx, unit in (("ambient light", r"illuminance", "lux"), ("colour temperature", r"in_colortemp|in_cct", "K"),
                            ("lid angle", r"angl", "deg")):
-        rr = next((r for r in iio if re.search(rx, r["attr"])), None)
+        rr = next((r for r in sorted(iio, key=lambda r: "in_cct" in r["attr"]) if re.search(rx, r["attr"])), None)
         if rr:
             v = rr["value"]
             items.append(item(kind, "ok" if isinstance(v, (int, float)) else "warn",

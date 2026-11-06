@@ -9,6 +9,7 @@ files and the SEP host state); nothing asks fprintd or the SEP anything.
 """
 
 import glob
+import configparser
 import os
 import pwd
 import re
@@ -22,6 +23,8 @@ UNIT_RE = re.compile(r"^(aurora[-\w]*|speaker\w*|fprintd|iio-sensor-proxy|power-
                      r"systemd-backlight@.*|alsa-state|alsa-restore|asahi[-\w]*|macsmc[-\w]*|"
                      r"pipewire|pipewire-pulse|wireplumber|shairport-sync|nqptp)\.(service|socket|timer)$")
 USER_UNITS = ("pipewire.service", "pipewire-pulse.service", "wireplumber.service")
+PROPERTIES = ("Id,ActiveState,SubState,UnitFileState,ExecMainStartTimestamp,NRestarts,Result,"
+              "LoadState,Type,BusName,TriggeredBy")
 
 
 def _run(cmd, timeout=10):
@@ -41,7 +44,12 @@ def system_units():
     res = []
     if not names:
         return res
-    rc, out = _run(["systemctl", "show", "--no-pager", "-p", "Id,ActiveState,SubState,UnitFileState,ExecMainStartTimestamp,NRestarts,Result"] + names)
+    return _show_units(["systemctl"], names)
+
+
+def _show_units(cmd, names, bus_names=None):
+    rc, out = _run(cmd + ["show", "--no-pager", "-p", PROPERTIES] + names)
+    res = []
     cur = {}
     for line in out.splitlines() + [""]:
         if not line.strip():
@@ -51,10 +59,63 @@ def system_units():
             continue
         k, _, v = line.partition("=")
         cur[k] = v
+    # TriggeredBy may name a socket outside UNIT_RE. Read its state as well.
+    sockets = sorted({n for u in res for n in u.get("TriggeredBy", "").split() if n.endswith(".socket")})
+    active_sockets = set()
+    if sockets:
+        _, socket_out = _run(cmd + ["show", "--no-pager", "-p", "Id,ActiveState,LoadState"] + sockets)
+        for block in socket_out.strip().split("\n\n"):
+            props = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+            if props.get("ActiveState") == "active" and props.get("LoadState") == "loaded":
+                active_sockets.add(props.get("Id"))
+    registered = _bus_names() if bus_names is None else bus_names
     return [{"unit": u.get("Id"), "active": u.get("ActiveState"), "sub": u.get("SubState"),
              "enabled": u.get("UnitFileState"), "since": u.get("ExecMainStartTimestamp") or None,
              "restarts": int(u["NRestarts"]) if u.get("NRestarts", "").isdigit() else None,
-             "result": u.get("Result")} for u in res]
+             "result": u.get("Result"), "load": u.get("LoadState"),
+             "type": u.get("Type"), "bus_name": u.get("BusName") or None,
+             "bus_activatable": u.get("Type") == "dbus" and u.get("BusName") in registered,
+             "active_sockets": sorted(active_sockets.intersection(u.get("TriggeredBy", "").split()))}
+            for u in res]
+
+
+def _bus_names():
+    """Read D-Bus activation registrations without starting a service."""
+    names = set()
+    for base in ("/etc", "/usr/local/share", "/usr/share"):
+        directory = base + "/dbus-1/system-services"
+        for name in sysfs.listdir(directory):
+            if not name.endswith(".service"):
+                continue
+            parser = configparser.ConfigParser(interpolation=None)
+            try:
+                parser.read_string(sysfs.read(directory + "/" + name) or "")
+                names.add(parser.get("D-BUS Service", "Name"))
+            except configparser.Error:
+                continue
+    return names
+
+
+def idle_activatable(unit):
+    """An idle, successfully stopped unit with a usable activation source."""
+    return (unit.get("active") == "inactive" and unit.get("load") == "loaded"
+            and unit.get("enabled") not in ("masked", "masked-runtime")
+            and unit.get("result") in ("success", None, "")
+            and bool(unit.get("bus_activatable") or unit.get("active_sockets")))
+
+
+def snapshot_idle(unit, state, details):
+    if unit in details:
+        return idle_activatable(dict(details[unit], active=state))
+    # Old schema-1 files have no activation metadata. fprintd is a known
+    # D-Bus-activated daemon; do not generalize this to arbitrary idle units.
+    return unit == "fprintd.service" and state == "inactive"
+
+
+def activation_details(unit):
+    """Only activation facts belong in snapshots, not timestamps or counters."""
+    return {k: unit.get(k) for k in ("load", "enabled", "result", "type", "bus_name",
+                                    "bus_activatable", "active_sockets")}
 
 
 def desktop_users():
@@ -76,9 +137,8 @@ def user_units():
             cmd = ["systemctl", "--user"]
         else:
             continue
-        for u in USER_UNITS:
-            rc, out = _run(cmd + ["is-active", u])
-            res.append({"unit": u, "user": p.pw_name, "active": out.strip() or "unknown"})
+        for u in _show_units(cmd, list(USER_UNITS), bus_names=set()):
+            res.append(dict(u, user=p.pw_name))
     return res
 
 
