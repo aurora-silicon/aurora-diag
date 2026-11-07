@@ -83,6 +83,10 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
                 lvl = "skip"  # static, disabled, indirect: runs on demand
             elif u.get("result") == "success":
                 lvl = "pass"
+            elif u.get("result") == "exec-condition":
+                # Its ExecCondition= decided this machine does not run it
+                # (for example the older speaker daemons beside v2).
+                lvl, why = "pass", why + ", skipped by its own condition"
             else:
                 lvl = "warn"
         if services.idle_activatable(u):

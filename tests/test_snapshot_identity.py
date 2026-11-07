@@ -158,6 +158,24 @@ class TestExpect(Base):
                 rows = self.run_expect(boot(), units=[u])
                 self.assertEqual(next(r for r in rows if r["group"] == "service")["level"], expected)
 
+    def test_enabled_unit_skipped_by_its_condition_passes(self):
+        # No baseline: an enabled unit whose ExecCondition= said no is by
+        # design (the older speaker daemons beside speakerguardd v2).
+        for result, expected in [("exec-condition", "pass"), ("exit-code", "warn")]:
+            with self.subTest(result=result):
+                u = unit(unit="speakerguardd.service", enabled="enabled", result=result,
+                         bus_activatable=False)
+                with contextlib.ExitStack() as stack:
+                    for target, value in [("subsystems.subsystems", []),
+                                          ("services.system_units", [u]), ("services.speakerguardd", {}),
+                                          ("subsystems.dmesg", []), ("snapshot._sensor_ids", []),
+                                          ("gpu.gpu_names", []), ("ane.collect", {"devices": []}),
+                                          ("ane.checks", [])]:
+                        stack.enter_context(patch("aurora_diag.check." + target, return_value=value))
+                    rows = check.run(Machine(), api=False, secs={})["checks"]
+                row = next(r for r in rows if r["group"] == "service" and r["name"] == "speakerguardd.service")
+                self.assertEqual(row["level"], expected)
+
     def test_expect_missing_service_and_lost_activation(self):
         for state in ("active", "inactive"):
             old = boot(details=unit(), state=state)
