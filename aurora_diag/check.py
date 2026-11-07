@@ -104,7 +104,12 @@ def run(machine, only=None, expect=None, api=True, timeout=8.0, secs=None):
                 out.append(_r("service", name, "fail", "active or activatable in the baseline, unit gone now"))
 
     sg, err = timed(services.speakerguardd, timeout)
-    if not err and sg.get("service") is not None:
+    if not err and sg.get("v2") in ("active", "failed"):
+        # speakerguardd v2 governs; the older daemons stay down beside it.
+        lvl = "fail" if sg["v2"] == "failed" else ("pass" if sg.get("v2_graph") in (None, "pass") else "warn")
+        out.append(_r("service", "speaker protection", lvl, "speakerguardd-v2 %s, graph %s, amps %s" % (
+            sg["v2"], sg.get("v2_graph"), sg.get("v2_amps"))))
+    elif not err and sg.get("service") is not None:
         lvl = "pass" if sg["service"] == "active" else ("fail" if sg["service"] == "failed" else "warn")
         out.append(_r("service", "speaker protection", lvl, "speakerguardd %s, armed %s, hottest coil %s C" % (
             sg["service"], sg.get("armed"), sg.get("hottest_coil_C"))))

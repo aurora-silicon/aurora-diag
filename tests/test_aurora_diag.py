@@ -152,6 +152,21 @@ class TestRead(Base):
         self.assertEqual(rs["speaker.speakerguardd.armed"]["value"], 1)
         self.assertTrue(all(not r["writable"] for r in rs.values()))
 
+    def test_speakerguardd_v2_state(self):
+        build(self.root)
+        w(self.root, "/run/speakerguardd-graph/state",
+          "result=pass\nuser=someone\ndigest=ab12\nchanged_us=7\nvoicing_pre=true\n")
+        w(self.root, "/run/speakerguardd/1000/helper/session",
+          "links=1 carrier=1 mono_ns=5 pid=9 start=7 wiring=b8b8 amps=1\n", 0o640)
+        rs = {r["id"]: r for r in audio.speaker_protection()}
+        self.assertEqual(rs["speaker.speakerguardd-v2.graph.result"]["value"], "pass")
+        self.assertEqual(rs["speaker.speakerguardd-v2.graph.voicing_pre"]["value"], "true")
+        self.assertNotIn("speaker.speakerguardd-v2.graph.user", rs)
+        self.assertEqual(rs["speaker.speakerguardd-v2.session.1000.amps"]["value"], "1")
+        self.assertNotIn("speaker.speakerguardd-v2.session.1000.pid", rs)
+        self.assertIn("speaker.speakerguardd-v2.service", rs)
+        self.assertTrue(all(not r["writable"] for r in rs.values()))
+
     def test_machine(self):
         build(self.root)
         m = Machine()
