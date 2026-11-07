@@ -259,6 +259,75 @@ class TestKnownWarnings(Base):
         self.assertFalse(any(r["level"] == "warn" and "%s/%s" % (r["group"], r["name"]) in warns for r in res2["checks"]))
 
 
+class TestGpuStats(Base):
+    """agx_stats as the aurora driver writes it: G13/G14 (busy_ns, pstate) and
+    G16S/G17P (firmware utilisation records, stale while the GPU is idle)."""
+
+    def gpu(self, stats):
+        build(self.root)
+        dev = "/sys/devices/platform/soc/206400000.gpu"
+        w(self.root, dev + "/agx_stats", stats)
+        os.makedirs(os.path.join(self.root, "sys/bus/platform/drivers/aurora"), exist_ok=True)
+        os.symlink(os.path.join(self.root, "sys/bus/platform/drivers/aurora"), os.path.join(self.root, dev.lstrip("/"), "driver"))
+        node = dt_node(self.root, "soc/gpu@206400000", "apple,agx-g14g", extra={"operating-points-v2": struct.pack(">I", 0x18)})
+        os.symlink(node, os.path.join(self.root, dev.lstrip("/"), "of_node"))
+        table = dt_node(self.root, "opp-table-gpu", "operating-points-v2", extra={"phandle": struct.pack(">I", 0x18)})
+        for i, hz in enumerate((0, 444000000, 612000000)):
+            os.makedirs(os.path.join(table, "opp%02d" % i))
+            with open(os.path.join(table, "opp%02d" % i, "opp-hz"), "wb") as f:
+                f.write(struct.pack(">Q", hz))
+        cls = os.path.join(self.root, "sys/class/drm")
+        os.makedirs(cls, exist_ok=True)
+        for n in ("card1", "renderD128"):
+            os.makedirs(os.path.join(cls, n), exist_ok=True)
+            os.symlink(os.path.join(self.root, dev.lstrip("/")), os.path.join(cls, n, "device"))
+        return {i["key"]: i for i in sections.gpu()["items"]}
+
+    def test_g14_pstate_frequency_from_dt(self):
+        items = self.gpu("busy_ns 1000\njobs 5\npstate 1\npower_mw 0\nutil1 0\n")
+        self.assertEqual(items["frequency"]["level"], "ok")
+        self.assertIn("444 MHz requested (pstate 1", items["frequency"]["detail"])
+
+    def test_g17_valid_utilisation(self):
+        items = self.gpu("utilisation_status valid\nutil_device_percent 55\npstate_status unavailable\npstate unsupported\n"
+                         "achieved_frequency_hz unsupported\nbusy_ns unsupported\n")
+        self.assertEqual(items["utilisation"]["level"], "ok")
+        self.assertIn("55% busy", items["utilisation"]["detail"])
+        self.assertEqual(items["frequency"]["level"], "off")
+        self.assertIn("not available on this GPU", items["frequency"]["detail"])
+
+    def test_g17_pstate_unavailable(self):
+        items = self.gpu("utilisation_status valid\nutil_device_percent 100\npstate_status unavailable\npstate unsupported\n"
+                         "requested_frequency_hz unsupported\nachieved_frequency_hz unsupported\n")
+        self.assertEqual(items["frequency"]["level"], "off")
+        self.assertIn("pstate_status=unavailable", items["frequency"]["detail"])
+
+    def test_g17_valid_pstate_is_not_mapped_to_the_dt_table(self):
+        # The G17 selector does not name a firmware table, so no MHz from the DT.
+        items = self.gpu("utilisation_status valid\nutil_device_percent 40\npstate_status valid\npstate 1\n"
+                         "requested_frequency_hz unsupported\nachieved_frequency_hz unsupported\n")
+        self.assertEqual(items["frequency"]["level"], "off")
+        self.assertIn("logical pstate 1", items["frequency"]["detail"])
+        self.assertNotIn("MHz", items["frequency"]["detail"])
+
+    def test_g14_pstate_zero_is_off(self):
+        items = self.gpu("busy_ns 1000\njobs 5\npstate 0\npower_mw 0\nutil1 0\n")
+        self.assertEqual(items["frequency"]["level"], "ok")
+        self.assertIn("off (pstate 0", items["frequency"]["detail"])
+        self.assertNotIn("0 MHz", items["frequency"]["detail"])
+
+    def test_g14_kernel_requested_frequency(self):
+        items = self.gpu("busy_ns 1000\njobs 5\npstate 2\npower_mw 0\nutil1 0\nrequested_frequency_hz 612000000\n")
+        self.assertEqual(items["frequency"]["level"], "ok")
+        self.assertIn("612 MHz requested (pstate 2)", items["frequency"]["detail"])
+
+    def test_g17_idle_is_not_absent(self):
+        items = self.gpu("utilisation_status stale\nutil_device_percent unsupported\npstate_status unavailable\n"
+                         "pstate unsupported\nachieved_frequency_hz unsupported\nbusy_ns unsupported\n")
+        self.assertEqual(items["utilisation"]["level"], "ok")
+        self.assertIn("idle", items["utilisation"]["detail"])
+
+
 class TestColourTemperatureABI(Base):
     def test_either_name(self):
         build(self.root)

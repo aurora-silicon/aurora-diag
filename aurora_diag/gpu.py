@@ -195,6 +195,38 @@ def utilisation(dev, stats):
     return round(max(0.0, min(100.0, 100.0 * (busy - prev[1]) / dt)), 1)
 
 
+def _dt_bytes(path):
+    try:
+        with open(sysfs.root(path), "rb") as f:
+            return f.read(4096)
+    except OSError:
+        return None
+
+
+def opp_table_hz(dev):
+    """The GPU's operating points from its device-tree node, lowest index
+    first: [opp-hz of each child of the table its operating-points-v2
+    phandle names]. Empty when the node has no table."""
+    of = sysfs.realpath(dev + "/of_node")
+    ph = _dt_bytes(of + "/operating-points-v2") if of else None
+    if not ph or len(ph) < 4:
+        return []
+    want = ph[:4]
+    base = "/sys/firmware/devicetree/base"
+    for parent in (base, base + "/soc"):
+        for n in sorted(sysfs.listdir(parent)):
+            node = parent + "/" + n
+            if not sysfs.isdir(node) or _dt_bytes(node + "/phandle") != want:
+                continue
+            out = []
+            for e in sorted(sysfs.listdir(node)):
+                hz = _dt_bytes(node + "/" + e + "/opp-hz")
+                if hz and len(hz) in (4, 8):
+                    out.append(int.from_bytes(hz, "big"))
+            return out
+    return []
+
+
 # -- per-process GPU use ----------------------------------------------------------
 
 def fdinfo_clients():
@@ -305,6 +337,22 @@ def readings(live_only=False):
                     u = utilisation(dev, kv)
                     if u is not None:
                         out.append(_reading(pre + ".util", "util", u, "%", "busy over the sample window", p, name))
+                    elif kv.get("utilisation_status") == "valid" and isinstance(kv.get("util_device_percent"), (int, float)):
+                        out.append(_reading(pre + ".util", "util", kv["util_device_percent"], "%",
+                                            "firmware device utilisation", p, name))
+                    elif kv.get("utilisation_status") in ("stale", "unavailable"):
+                        out.append(_reading(pre + ".util_idle", "util_idle", kv["utilisation_status"], None,
+                                            "no recent firmware utilisation sample (the GPU is idle or power-gated)", p, name))
+                    ps = kv.get("pstate")
+                    # Only the G13/G14 pstate indexes the DT table. G16S/G17P
+                    # (they print pstate_status) report a logical selector that
+                    # does not say which firmware table it is in.
+                    if isinstance(ps, int) and "pstate_status" not in kv and \
+                            not isinstance(kv.get("achieved_frequency_hz"), (int, float)):
+                        opps = opp_table_hz(dev["path"])
+                        if 0 <= ps < len(opps):
+                            out.append(_reading(pre + ".pstate_hz", "pstate_hz", opps[ps], "Hz",
+                                                "pstate %d in the device-tree operating-point table" % ps, p, name))
             else:
                 out.append(_reading("%s.%s" % (pre, f), f, _num(text) if text is not None else "unreadable",
                                     path=p, dev=name, writable=sysfs.writable(p)))
