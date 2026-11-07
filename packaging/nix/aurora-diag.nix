@@ -15,6 +15,7 @@ stdenvNoCC.mkDerivation {
   installPhase = ''
     make install DESTDIR=$out PREFIX=
     substituteInPlace $out/bin/aurora-diag --replace-fail "#!/usr/bin/python3 -I" "#!${py.interpreter} -I"
+    substituteInPlace $out/bin/aurora-se-probe --replace-fail "#!/usr/bin/python3 -I" "#!${py.interpreter} -I"
     wrapProgram $out/bin/aurora-diag \
       --prefix PATH : ${lib.makeBinPath [ alsa-utils glib vulkan-tools mesa-demos ]} \
       --prefix LD_LIBRARY_PATH : /run/opengl-driver/lib:${lib.makeLibraryPath [ libglvnd ]}

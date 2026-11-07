@@ -54,6 +54,18 @@ The first tile on the overview is **Demos**: one place to see and start every de
 Programs are found, not assumed: PATH, the desktop user's `~/.local/bin` and `~/aurora-try-dev`, and the bench kits under `/var/tmp` and `/root`. Apps run as the desktop user in their session.
 
 ![Demos](docs/screenshots/j616s-demos.png)
+
+### Secure Element (read only)
+
+`aurora-se-probe` shows what is inside the Mac's embedded Secure Element, the Apple Pay chip behind the Stockholm NFC controller. It's also the `secure-element` demo. The kernel driver does the talking, and only when it is loaded with `se_probe=1`. It sends nothing but a compiled-in table of SELECT and GET DATA commands, and checks each one against an allowlist. No authentication, install, delete, key or store command can reach the chip. The tool only decodes the kernel's report.
+
+    sudo modprobe -r apple_stockholm && sudo modprobe apple_stockholm se_probe=1   # this boot only
+    sudo aurora-se-probe                 # decoded, serial numbers and dates redacted
+    sudo aurora-se-probe --nfcee-only    # discovery only, nothing sent to the Secure Element
+    sudo aurora-se-probe --json --raw-out ~/private   # raw report saved 0600; keep it private
+    sudo aurora-se-probe --allowlist     # the kernel's command table
+
+On the MacBook Neo the controller reports one execution environment: its HCI network, disabled, with HCI access only. No applet can be selected without creating HCI pipes, which would change controller state that macOS shares, so the probe stops there.
 ![Motion demo](docs/screenshots/j616s-demo-motion.png)
 
 ## What it covers

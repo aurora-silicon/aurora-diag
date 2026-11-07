@@ -593,6 +593,16 @@ def speaker_probe():
     return "absent", "speakerguardd is %s on this machine" % (svc or "not installed")
 
 
+def se_element_probe():
+    from . import se_probe
+    return se_probe.availability()
+
+
+def se_element_command():
+    p = find_bin(["aurora-se-probe"])
+    return [p] if p else None
+
+
 def build():
     sample = lambda: next((p for h in homes() for p in [os.path.join(h, "aurora-try-dev/data/demo-30s.wav")] if os.path.isfile(p)), None)
     return [
@@ -654,6 +664,11 @@ def build():
         Demo("upscale", "Photo upscale 4x", "bench", "GPU (ncnn Vulkan)",
              "a photo upscaled 4x with a before/after page to open; prints the time it took.",
              try_probe(), try_cmd("upscale", "demo", "--x4"), as_user=True, timeout=300),
+        Demo("secure-element", "Secure Element, read only", "bench", "Stockholm NFC controller + eSE",
+             "what is inside the embedded Secure Element (the Apple Pay chip): which execution environments the "
+             "controller reports and, where one takes commands, which well-known applets answer a SELECT. "
+             "Read only: the kernel sends only its compiled-in SELECT/GET DATA table. Serial numbers redacted.",
+             se_element_probe, se_element_command, timeout=60),
         Demo("web", "Camera in a browser", "launch", "camera + effects (aurora-try web)",
              "a URL to open on your phone with the live camera and effect buttons. Uses the camera.",
              try_probe(camera=True), try_cmd("web", "--lan"), uses=("camera",), as_user=True),
