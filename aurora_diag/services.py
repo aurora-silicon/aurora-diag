@@ -173,7 +173,11 @@ def speakerguardd():
     by = {r["id"]: r["value"] for r in rs}
     coils = {r["id"].replace("speaker.speakerguardd.", ""): r["value"] for r in rs
              if r["attr"] in ("t_coil_C", "ff_coil_C", "vi_coil_C", "t_magnet_C") and isinstance(r["value"], float)}
-    return {"service": by.get("speaker.speakerguardd.service"), "armed": by.get("speaker.speakerguardd.armed"),
+    amps = [v for k, v in by.items() if k.startswith("speaker.speakerguardd-v2.session.") and k.endswith(".amps")]
+    return {"v2": by.get("speaker.speakerguardd-v2.service"),
+            "v2_graph": by.get("speaker.speakerguardd-v2.graph.result"),
+            "v2_amps": amps[0] if amps else None,
+            "service": by.get("speaker.speakerguardd.service"), "armed": by.get("speaker.speakerguardd.armed"),
             "governor": by.get("speaker.speakerguardd.shadow.gov"),
             "speakersafetyd": by.get("speaker.speakersafetyd.service"),
             "model_temperatures_C": coils, "hottest_coil_C": max(coils.values()) if coils else None}

@@ -9,6 +9,7 @@ SPEAKER_PROTECTED there).
 """
 
 import json
+import glob
 import os
 import re
 import shutil
@@ -17,6 +18,10 @@ import subprocess
 from . import sysfs
 
 SG_DIR = "/run/speakerguardd"
+# speakerguardd v2 publishes the graph it installed (key=value lines) and one
+# session file per seat user (space separated key=value pairs).
+SGV2_GRAPH = "/run/speakerguardd-graph/state"
+SGV2_SESSIONS = SG_DIR + "/*/helper/session"
 
 
 def _systemctl_active(unit):
@@ -27,6 +32,16 @@ def _systemctl_active(unit):
         return r.stdout.strip() or None
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def parse_kv(text, sep=None):
+    """key=value pairs, one per line (sep None) or split on sep."""
+    out = {}
+    for tok in (text or "").split(sep) if sep else (text or "").splitlines():
+        k, eq, v = tok.strip().partition("=")
+        if eq and k:
+            out[k] = v
+    return out
 
 
 def parse_speakerguardd_state(text):
@@ -84,7 +99,8 @@ def tail_jsonl(path, nbytes=65536):
 
 
 def speaker_protection():
-    """Readings for both protection daemons. Unreadable state (not root) is
+    """Readings for the protection daemons (speakerguardd v2 and the older
+    speakerguardd and speakersafetyd). Unreadable state (not root) is
     reported as such, never guessed."""
     out = []
 
@@ -93,8 +109,27 @@ def speaker_protection():
                     "label": label, "value": value, "unit": unit, "raw": str(value),
                     "path": path, "writable": False})
 
-    for unit in ("speakerguardd", "speakersafetyd"):
+    for unit in ("speakerguardd-v2", "speakerguardd", "speakersafetyd"):
         rd("speaker.%s.service" % unit, "service", _systemctl_active(unit + ".service") or "unknown")
+
+    if sysfs.exists(SGV2_GRAPH):
+        text = sysfs.read(SGV2_GRAPH)
+        if text is None:
+            rd("speaker.speakerguardd-v2.graph", "graph", "unreadable (needs root)", path=SGV2_GRAPH)
+        else:
+            for k, v in parse_kv(text).items():
+                if k != "user":
+                    rd("speaker.speakerguardd-v2.graph.%s" % k, k, v, path=SGV2_GRAPH)
+    for f in sorted(glob.glob(sysfs.root(SGV2_SESSIONS))):
+        path = sysfs.unroot(f)
+        uid = path.split("/")[3]
+        text = sysfs.read(path)
+        if text is None:
+            rd("speaker.speakerguardd-v2.session.%s" % uid, "session", "unreadable (needs root)", path=path)
+            continue
+        for k, v in parse_kv(text, sep=" ").items():
+            if k in ("links", "carrier", "amps", "wiring"):
+                rd("speaker.speakerguardd-v2.session.%s.%s" % (uid, k), k, v, path=path)
 
     state_path = SG_DIR + "/state"
     if sysfs.exists(state_path):
