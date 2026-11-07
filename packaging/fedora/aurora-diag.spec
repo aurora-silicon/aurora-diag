@@ -40,6 +40,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %license LICENSE
 %doc %{_docdir}/aurora-diag
 %{_bindir}/aurora-diag
+%{_bindir}/aurora-se-probe
 %{_datadir}/aurora-diag
 %{_datadir}/applications/org.aurorasilicon.Diag.desktop
 

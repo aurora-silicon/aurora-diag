@@ -15,6 +15,7 @@ install:
 	install -m644 aurora_diag/macos_baseline.json $(SHARE)/aurora_diag/
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/doc/aurora-diag
 	install -m755 bin/aurora-diag $(DESTDIR)$(PREFIX)/bin/aurora-diag
+	install -m755 bin/aurora-se-probe $(DESTDIR)$(PREFIX)/bin/aurora-se-probe
 	install -Dm644 data/org.aurorasilicon.Diag.desktop $(DESTDIR)$(PREFIX)/share/applications/org.aurorasilicon.Diag.desktop
 	install -m644 README.md docs/LOG.md docs/SCHEMA.md docs/COMPLIANCE.md docs/MORNING-TESTS.md $(DESTDIR)$(PREFIX)/share/doc/aurora-diag/
 
@@ -32,6 +33,7 @@ install-atomic:
 	if [ -d $$S/aurora_diag ] && [ ! -L $$S/aurora_diag ]; then rm -rf $$S/aurora_diag.pre-atomic; mv $$S/aurora_diag $$S/aurora_diag.pre-atomic; fi; \
 	ln -sfn $$N/aurora_diag $$S/.aurora_diag.new && mv -T $$S/.aurora_diag.new $$S/aurora_diag; \
 	mv -f $$S/.aurora-diag.bin.new $(DESTDIR)$(PREFIX)/bin/aurora-diag; \
+	install -m755 bin/aurora-se-probe $(DESTDIR)$(PREFIX)/bin/aurora-se-probe; \
 	sync; \
 	ls -1d $$S/releases/* | head -n -3 | xargs -r rm -rf; \
 	rm -rf $$S/aurora_diag.pre-atomic; \
