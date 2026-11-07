@@ -29,7 +29,11 @@ import os
 import re
 import sys
 
-from . import sysfs
+try:
+    from . import sysfs
+except ImportError:  # run as a single file (python3 -I se_probe.py)
+    class sysfs:  # noqa: N801
+        root = staticmethod(lambda path: path)
 
 DEBUGFS = "/sys/kernel/debug/apple-stockholm"
 PARAM = "/sys/module/apple_stockholm/parameters/se_probe"
