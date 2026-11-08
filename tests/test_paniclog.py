@@ -254,5 +254,104 @@ class TestDevice(unittest.TestCase):
         self.assertIn("no panic-log namespace", out.getvalue())
 
 
+DMESG = ("[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x612f0240]\n"
+         "[    0.000000] Linux version 7.3.0-test1 (builder@host) #1 SMP PREEMPT\n"
+         "[  120.000001] something earlier\n"
+         "[  121.500000] sysrq: Trigger a crash\n"
+         "[  121.500010] Kernel panic - not syncing: sysrq triggered crash\n"
+         "[  121.500020] CPU: 3 UID: 0 PID: 4242 Comm: sh Kdump: loaded Tainted: G S                  7.3.0-test1 #1 PREEMPT(lazy)\n"
+         "[  121.500030] Call trace:\n"
+         "[  121.500040]  panic+0x1/0x2\n")
+
+
+class TestLinuxDumps(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+        self._root = sysfs.ROOT
+        sysfs.ROOT = self.root
+        os.makedirs(os.path.join(self.root, "sys/block"))
+
+    def tearDown(self):
+        sysfs.ROOT = self._root
+        self.tmp.cleanup()
+
+    def dump(self, name, files, base="var/crash"):
+        d = os.path.join(self.root, base, name)
+        os.makedirs(d)
+        for f, data in files.items():
+            put(os.path.join(d, f), data)
+        return d
+
+    def test_summary_from_the_crashed_kernels_log(self):
+        s = paniclog._dmesg_summary(DMESG)
+        self.assertEqual(s["kernel"], "7.3.0-test1")
+        self.assertEqual(s["panic"], "sysrq triggered crash")
+        self.assertEqual(s["excerpt"][0], "sysrq: Trigger a crash")
+        self.assertEqual(s["excerpt"][-1], "Kernel panic - not syncing: sysrq triggered crash")
+
+    def test_release_with_and_without_taint(self):
+        for line in ("CPU: 0 UID: 0 PID: 1 Comm: swapper/0 Not tainted 7.3.0-a1 #3 PREEMPT",
+                     "CPU: 3 UID: 0 PID: 5639 Comm: sh Kdump: loaded Tainted: G S                  7.3.0-a2 #2 PREEMPT(lazy)",
+                     "CPU: 1 UID: 0 PID: 9 Comm: kworker/1:0 Tainted: G        W  O       7.3.0-a3 #1"):
+            self.assertRegex(paniclog._dmesg_summary(line)["kernel"], r"^7\.3\.0-a[123]$")
+
+    def test_listing_newest_first_and_states(self):
+        self.dump("127.0.0.1-2026-11-08-16:41:21", {"vmcore": b"\0" * 8192, "vmcore-dmesg.txt": DMESG,
+                                                    "kexec-dmesg.log": "capture\n"})
+        self.dump("127.0.0.1-2026-11-09-08:00:00", {"vmcore-incomplete": b"\0" * 4096})
+        self.dump("127.0.0.1-2026-11-07-01:02:03", {"vmcore-dmesg.txt": DMESG})
+        os.makedirs(os.path.join(self.root, "var/crash/not-a-dump"))
+        dumps = paniclog.linux_dumps()
+        self.assertEqual([d["time"] for d in dumps],
+                         ["2026-11-09 08:00:00", "2026-11-08 16:41:21", "2026-11-07 01:02:03"])
+        self.assertEqual([d["state"] for d in dumps], ["incomplete", "complete", "log only"])
+        self.assertEqual(dumps[1]["kernel"], "7.3.0-test1")
+        self.assertEqual(dumps[1]["dir"], "/var/crash/127.0.0.1-2026-11-08-16:41:21")
+        text = "\n".join(paniclog.describe_linux(dumps, "/var/crash"))
+        self.assertIn("Linux crash dumps (kdump, /var/crash): 3", text)
+        self.assertIn("Kernel panic: sysrq triggered crash", text)
+
+    def test_kdump_conf_path_and_other_targets(self):
+        os.makedirs(os.path.join(self.root, "etc"))
+        put(os.path.join(self.root, "etc/kdump.conf"), "# comment\npath /srv/dumps  # here\ncore_collector makedumpfile -l\n")
+        self.assertEqual(paniclog.kdump_config(), ("/srv/dumps", None))
+        put(os.path.join(self.root, "etc/kdump.conf"), "ssh root@host\npath /var/crash\n")
+        self.assertEqual(paniclog.kdump_config(), ("/var/crash", "ssh root@host"))
+        self.assertIn("not on this filesystem", paniclog.describe_linux([], "/var/crash", "ssh root@host")[0])
+
+    def test_vmcore_is_never_opened(self):
+        self.dump("h-2026-11-08-16:41:21", {"vmcore": b"\0" * 8192, "vmcore-dmesg.txt": DMESG})
+        with mock.patch("builtins.open", wraps=open) as op, mock.patch("os.open", wraps=os.open) as oo:
+            paniclog.linux_dumps()
+        opened = [str(c.args[0]) for c in op.call_args_list] + [str(c.args[0]) for c in oo.call_args_list]
+        self.assertFalse([o for o in opened if o.endswith("/vmcore")])
+        for c in op.call_args_list:
+            self.assertNotIn("w", c.args[1] if len(c.args) > 1 else "r")
+
+    def test_cli_lists_dumps_without_a_namespace(self):
+        self.dump("127.0.0.1-2026-11-08-16:41:21", {"vmcore": b"\0" * 8192, "vmcore-dmesg.txt": DMESG})
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cli.main(["--log", os.path.join(self.root, "log.jsonl"), "panic-log"])
+        self.assertEqual(rc, 0)
+        self.assertIn("no panic-log namespace", out.getvalue())
+        self.assertIn("| sysrq: Trigger a crash", out.getvalue())
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cli.main(["--json", "--log", os.path.join(self.root, "log.jsonl"), "panic-log"])
+        doc = json.loads(out.getvalue())
+        self.assertEqual(doc["linux"]["dumps"][0]["state"], "complete")
+        self.assertEqual(doc["linux"]["path"], "/var/crash")
+
+    def test_cli_kdump_dir_override(self):
+        self.dump("h-2026-11-08-16:41:21", {"vmcore-dmesg.txt": DMESG}, base="elsewhere")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = cli.main(["--log", os.path.join(self.root, "log.jsonl"), "panic-log", "--kdump-dir", "/elsewhere"])
+        self.assertEqual(rc, 0)
+        self.assertIn("Linux crash dumps (kdump, /elsewhere): 1", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

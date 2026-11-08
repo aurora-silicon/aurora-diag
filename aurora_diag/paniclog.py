@@ -308,3 +308,124 @@ def describe(res, lines=12):
             out.append("  container entry %d: type %d, status 0x%x, %d bytes%s" % (
                 e["index"], e["type"], e["status"], e["length"], (", " + e["error"]) if e.get("error") else ""))
     return out
+
+
+# Linux's own crashes: kdump (kdump-utils) saves each one in a directory
+# under the "path" of /etc/kdump.conf, /var/crash by default, named
+# <host>-<YYYY-MM-DD-HH:MM:SS> and holding vmcore (vmcore-incomplete while
+# makedumpfile runs, vmcore.flat for a flattened dump), vmcore-dmesg.txt (the
+# crashed kernel's log) and kexec-dmesg.log (the crash kernel's own log).
+
+KDUMP_CONF = "/etc/kdump.conf"
+KDUMP_DEFAULT_PATH = "/var/crash"
+KDUMP_DIR_RE = re.compile(r"^(?P<host>.+)-(?P<date>\d{4}-\d{2}-\d{2})-(?P<time>\d{2}:\d{2}:\d{2})$")
+KDUMP_TARGETS = ("raw", "ssh", "nfs", "ext2", "ext3", "ext4", "xfs", "btrfs", "minix", "virtiofs", "vfat")
+DMESG_LIMIT = 8 << 20
+STAMP_RE = re.compile(r"^(?:<\d+>)?\[\s*\d+\.\d+\]\s?")
+CAUSE_RE = re.compile(r"sysrq: Trigger a crash|Unable to handle kernel|Internal error:|"
+                      r"\bBUG:|kernel BUG at|Oops|WARNING:.*panic_on_warn|watchdog: .*(?:lockup|stuck)|"
+                      r"Kernel panic - not syncing")
+# "CPU: 3 UID: 0 PID: 5639 Comm: sh Kdump: loaded Tainted: G S      7.3.0-aurora-kdump2 #2 PREEMPT(lazy)"
+KREL_RE = re.compile(r"Comm: .*?(?:Not tainted|Tainted:[A-Z ]*)\s(\d\S*) #\d")
+
+
+def kdump_config():
+    """(path, other_target): where kdump saves on this filesystem, and the
+    dump target named in kdump.conf when it is somewhere else (another
+    device, NFS or ssh), in which case nothing is listed here."""
+    path, target = KDUMP_DEFAULT_PATH, None
+    for line in (sysfs.read(KDUMP_CONF) or "").splitlines():
+        w = line.split("#", 1)[0].split()
+        if len(w) >= 2 and w[0] == "path":
+            path = w[1]
+        elif len(w) >= 2 and w[0] in KDUMP_TARGETS:
+            target = " ".join(w)
+    return path, target
+
+
+def _dmesg_summary(text):
+    """The kernel release, the panic line and the lines from the first sign
+    of the crash, from a crashed kernel's log (vmcore-dmesg.txt)."""
+    lines = [STAMP_RE.sub("", ln) for ln in text.splitlines()]
+    out = {"kernel": None, "panic": None, "excerpt": []}
+    for ln in lines:
+        m = KREL_RE.search(ln)
+        if m:
+            out["kernel"] = m.group(1)
+            break
+    if not out["kernel"]:
+        for ln in lines:
+            m = re.search(r"Linux version (\S+)", ln)
+            if m:
+                out["kernel"] = m.group(1)
+    panics = [i for i, ln in enumerate(lines) if "Kernel panic - not syncing" in ln]
+    if panics:
+        out["panic"] = lines[panics[-1]].split("Kernel panic - not syncing:", 1)[-1].strip() or lines[panics[-1]].strip()
+    end = panics[-1] if panics else len(lines) - 1
+    start = end
+    for i in range(end, max(-1, end - 400), -1):
+        if CAUSE_RE.search(lines[i]):
+            start = i
+    out["excerpt"] = lines[start:end + 1] if lines else []
+    return out
+
+
+def linux_dumps(path=None):
+    """The kdump crash directories under path (default: from kdump.conf),
+    newest first. Never writes; the vmcore itself is only stat()ed."""
+    if path is None:
+        path, _ = kdump_config()
+    dumps = []
+    for name in sysfs.listdir(path):
+        m = KDUMP_DIR_RE.match(name)
+        d = os.path.join(path, name)
+        if not m or not sysfs.isdir(d):
+            continue
+        files = sysfs.listdir(d)
+        ent = {"dir": d, "host": m.group("host"), "time": "%s %s" % (m.group("date"), m.group("time")),
+               "files": files, "vmcore": None, "vmcore_bytes": None}
+        for core, state in (("vmcore", "complete"), ("vmcore.flat", "complete"), ("vmcore-incomplete", "incomplete")):
+            if core in files:
+                ent["vmcore"] = core
+                ent["state"] = state
+                try:
+                    ent["vmcore_bytes"] = os.stat(sysfs.root(os.path.join(d, core))).st_blocks * 512
+                except OSError:
+                    pass
+                break
+        else:
+            ent["state"] = "log only" if any(f.startswith("vmcore-dmesg") for f in files) else "empty"
+        for log in ("vmcore-dmesg.txt", "vmcore-dmesg-incomplete.txt"):
+            if log in files:
+                text, err = sysfs.read_error(os.path.join(d, log), limit=DMESG_LIMIT)
+                if text is None:
+                    ent["dmesg_error"] = err
+                else:
+                    ent["dmesg"] = log
+                    ent.update(_dmesg_summary(text))
+                break
+        dumps.append(ent)
+    dumps.sort(key=lambda e: e["time"], reverse=True)
+    return dumps
+
+
+def describe_linux(dumps, path, target=None, lines=12):
+    """Human-readable lines for the kdump directories."""
+    if target:
+        return ["Linux crash dumps (kdump): saved to %s, not on this filesystem" % target]
+    if not dumps:
+        return ["Linux crash dumps (kdump, %s): none" % path]
+    out = ["Linux crash dumps (kdump, %s): %d" % (path, len(dumps))]
+    for i, d in enumerate(dumps):
+        size = " %d MiB" % (d["vmcore_bytes"] >> 20) if d.get("vmcore_bytes") is not None else ""
+        out.append("  %s  %s  %s%s  %s" % (d["time"], d.get("kernel") or "kernel unknown",
+                                           (d["vmcore"] or "no vmcore") + ("" if d["state"] == "complete" else " (%s)" % d["state"]),
+                                           size, d["dir"]))
+        if d.get("dmesg_error"):
+            out.append("    cannot read the crashed kernel's log (%s); that needs root" % d["dmesg_error"])
+        elif d.get("panic"):
+            out.append("    Kernel panic: %s" % d["panic"])
+        if i == 0:
+            for ln in d.get("excerpt", [])[:lines]:
+                out.append("    | " + ln)
+    return out

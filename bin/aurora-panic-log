@@ -1,6 +1,7 @@
 #!/usr/bin/python3 -I
 # SPDX-License-Identifier: MIT
-# aurora-panic-log: the last panic iBoot kept for the next OS, read only.
+# aurora-panic-log: the last panic iBoot kept for the next OS, and Linux's
+# kdump crash dumps, read only.
 # Same as `aurora-diag panic-log`; runs from a checkout or an install.
 import os
 import sys
