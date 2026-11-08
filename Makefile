@@ -15,6 +15,7 @@ install:
 	install -m644 aurora_diag/macos_baseline.json $(SHARE)/aurora_diag/
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/doc/aurora-diag
 	install -m755 bin/aurora-diag $(DESTDIR)$(PREFIX)/bin/aurora-diag
+	install -m755 bin/aurora-panic-log $(DESTDIR)$(PREFIX)/bin/aurora-panic-log
 	install -Dm644 data/org.aurorasilicon.Diag.desktop $(DESTDIR)$(PREFIX)/share/applications/org.aurorasilicon.Diag.desktop
 	install -m644 README.md docs/LOG.md docs/SCHEMA.md docs/COMPLIANCE.md docs/MORNING-TESTS.md $(DESTDIR)$(PREFIX)/share/doc/aurora-diag/
 
@@ -28,10 +29,12 @@ install-atomic:
 	install -d $$R/aurora_diag $(DESTDIR)$(PREFIX)/bin; \
 	install -m644 aurora_diag/*.py aurora_diag/macos_baseline.json $$R/aurora_diag/; \
 	install -m755 bin/aurora-diag $$S/.aurora-diag.bin.new; \
+	install -m755 bin/aurora-panic-log $(DESTDIR)$(PREFIX)/bin/.aurora-panic-log.new; \
 	sync; \
 	if [ -d $$S/aurora_diag ] && [ ! -L $$S/aurora_diag ]; then rm -rf $$S/aurora_diag.pre-atomic; mv $$S/aurora_diag $$S/aurora_diag.pre-atomic; fi; \
 	ln -sfn $$N/aurora_diag $$S/.aurora_diag.new && mv -T $$S/.aurora_diag.new $$S/aurora_diag; \
 	mv -f $$S/.aurora-diag.bin.new $(DESTDIR)$(PREFIX)/bin/aurora-diag; \
+	mv -f $(DESTDIR)$(PREFIX)/bin/.aurora-panic-log.new $(DESTDIR)$(PREFIX)/bin/aurora-panic-log; \
 	sync; \
 	ls -1d $$S/releases/* | head -n -3 | xargs -r rm -rf; \
 	rm -rf $$S/aurora_diag.pre-atomic; \

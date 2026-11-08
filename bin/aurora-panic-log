@@ -1,0 +1,23 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: MIT
+# aurora-panic-log: the last panic iBoot kept for the next OS, read only.
+# Same as `aurora-diag panic-log`; runs from a checkout or an install.
+import os
+import sys
+
+here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+for cand in (here, os.path.join(here, "share", "aurora-diag")):
+    if os.path.isdir(os.path.join(cand, "aurora_diag")):
+        sys.path.insert(0, cand)
+        break
+
+from aurora_diag.cli import main  # noqa: E402
+
+args = sys.argv[1:]
+front = [a for a in args if a == "--json"]
+rc = main(front + ["panic-log"] + [a for a in args if a != "--json"])
+try:
+    sys.stdout.flush()
+except BrokenPipeError:
+    pass
+os._exit(rc or 0)

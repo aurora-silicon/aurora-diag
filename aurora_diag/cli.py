@@ -586,6 +586,44 @@ def cmd_demo(args, m):
     return 0 if rc == 0 else 1
 
 
+def cmd_panic_log(args, m):
+    """The last panic iBoot kept for the next OS (read only; needs root)."""
+    from . import paniclog
+    results = paniclog.find(args.device)
+    if not results:
+        msg = "no panic-log namespace found (an Apple NVMe namespace other than 1, at most 16 MiB)"
+        if args.json:
+            print(json.dumps({"schema": "aurora-diag/panic-log", "version": 1, "results": [], "error": msg}))
+        else:
+            print(msg)
+        return 1
+    saved = []
+    if args.save:
+        for res in results:
+            raw = paniclog.read_device(res["device"]) if args.raw and res.get("state") == "record" else None
+            for rec in res.get("records", []):
+                saved += paniclog.save(rec, args.save, raw)
+    log.event("panic-log", results=[{k: v for k, v in r.items() if k != "records"} for r in results],
+              records=[{k: v for k, v in rec.items() if k not in ("panic_text", "other_text")}
+                       for r in results for rec in r.get("records", [])], saved=saved)
+    if args.json:
+        doc = {"schema": "aurora-diag/panic-log", "version": 1, "results": results, "saved": saved}
+        if not args.full:
+            for r in doc["results"]:
+                for rec in r.get("records", []):
+                    rec["panic_text"] = "\n".join(rec["panic_text"].splitlines()[:args.lines])
+        print(json.dumps(doc, default=str))
+    else:
+        for res in results:
+            for ln in paniclog.describe(res, lines=10 ** 6 if args.full else args.lines):
+                print(ln)
+        for path in saved:
+            print("saved " + path)
+    if any(r.get("state") == "error" for r in results):
+        return 2
+    return 0
+
+
 def cmd_coverage(args, m):
     """Every category item, present or absent with the reason."""
     from . import sections
@@ -834,6 +872,12 @@ def parser():
     x.add_argument("--snapshot", help="show a saved `list --json` capture instead of this machine (read only)")
     x.add_argument("--curses", action="store_true", help="the plain curses view even when Textual is installed")
     x.add_argument("--dump", metavar="FILE", help="write a capture of everything the dashboard shows (10 s of samples) and exit")
+    x = sub.add_parser("panic-log", help="the last panic iBoot kept for the next OS (macOS today), read only; needs root")
+    x.add_argument("--device", help="read this block device instead of finding the panic-log namespace")
+    x.add_argument("--lines", type=int, default=12, help="panic text lines to show (default 12)")
+    x.add_argument("--full", action="store_true", help="the whole panic text")
+    x.add_argument("--save", metavar="DIR", help="write the panic text (and other log) to DIR, mode 0600")
+    x.add_argument("--raw", action="store_true", help="with --save, also the whole namespace image (holds machine identifiers)")
     sub.add_parser("log-path", help="where the log goes")
     return p
 
@@ -845,10 +889,11 @@ COMMANDS = {
     "set": cmd_set, "watch": cmd_watch, "fan": cmd_fan, "fan-guard": cmd_fan_guard,
     "haptic": cmd_haptic, "display": cmd_display, "kbd": cmd_kbd, "audio": cmd_audio,
     "journal": cmd_journal, "restore": cmd_restore, "tui": cmd_tui, "log-path": cmd_log_path,
+    "panic-log": cmd_panic_log,
 }
 
 
-DOCUMENT_COMMANDS = ("check", "snapshot", "diff", "report", "gpu", "ane", "compare", "clocks", "services", "show", "coverage")
+DOCUMENT_COMMANDS = ("panic-log", "check", "snapshot", "diff", "report", "gpu", "ane", "compare", "clocks", "services", "show", "coverage")
 GLOBAL_FLAGS = ("--json", "--allow-unknown", "--dry-run")
 
 

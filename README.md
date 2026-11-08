@@ -26,8 +26,13 @@ Every tile opens a live drill-down (click it, or Tab to it and press Enter). The
     aurora-diag show all                 # every category as text
     aurora-diag coverage                 # every item: present, or absent and why
     aurora-diag tui                      # the dashboard
+    aurora-panic-log                     # the last panic iBoot kept for the next OS (root, read only)
 
 Reading needs no privileges, though root sees more (debugfs, dmesg, speakerguardd's state, the actuator's reports). Changes need root.
+
+## Panic log
+
+`aurora-panic-log` (same as `aurora-diag panic-log`) shows the last kernel panic that iBoot kept for the next OS. On the next boot after a panic, iBoot hands the panic record over in a small namespace of the internal NVMe drive (on the MacBook Neo, `/dev/nvme0n3`). Linux sees that namespace as an ordinary block device. Today the record comes from macOS panics. The tool prints the OS version, the panic time, the boot-session UUID and the first lines of the panic text. `--full` prints the whole text, `--save DIR` writes it to files (mode 0600), and `--json` prints one document. It needs root, opens the device read-only and never issues a write, trim or unmap. Reading does not consume the record: macOS clears it the next time macOS boots.
 
 ## Demos
 
