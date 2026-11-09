@@ -749,6 +749,11 @@ def cmd_tui(args, m):
     tui.run(args, m)
 
 
+def cmd_dj_check(args, m):
+    from . import djcheck
+    return djcheck.run_check(args)
+
+
 def cmd_log_path(args, m):
     print(log.log_path())
 
@@ -896,6 +901,10 @@ def parser():
     x.add_argument("--raw", action="store_true", help="with --save, also the whole namespace image (holds machine identifiers)")
     x.add_argument("--kdump-dir", metavar="DIR", help="list kdump crash directories here instead of the path in /etc/kdump.conf")
     sub.add_parser("log-path", help="where the log goes")
+    x = sub.add_parser("dj-check", help="speaker fix, speaker info, Touch ID and radio checks with a PASS/FAIL table and a redacted report (root)")
+    x.add_argument("--no-listen", action="store_true", help="skip the optional listening step (no prompt, no sound)")
+    x.add_argument("--user", help="the desktop user whose PipeWire session to read (default: the sudo user)")
+    x.add_argument("--out", help="report path without extension (default: ~user/aurora-dj-check-<time>)")
     return p
 
 
@@ -907,6 +916,7 @@ COMMANDS = {
     "haptic": cmd_haptic, "display": cmd_display, "kbd": cmd_kbd, "audio": cmd_audio,
     "journal": cmd_journal, "restore": cmd_restore, "tui": cmd_tui, "log-path": cmd_log_path,
     "panic-log": cmd_panic_log,
+    "dj-check": cmd_dj_check,
 }
 
 
@@ -937,6 +947,8 @@ def main(argv=None):
     if not args.cmd:
         args.cmd = "summary"
         args.cat = args.source = args.grep = None
+    if args.cmd == "dj-check" and not args.log:
+        args.log = os.devnull  # dj-check writes only its report
     # Commands that print one JSON document keep stdout for that document;
     # their events still go to the log file.
     log.setup(stdout_json=args.json and args.cmd not in DOCUMENT_COMMANDS, path=args.log)

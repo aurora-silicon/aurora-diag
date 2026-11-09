@@ -120,6 +120,25 @@ The raw sources behind them:
 
 The JSON formats (`check`, `snapshot`, `diff`, the log) carry a `schema` and a `version` field and are documented in [docs/SCHEMA.md](docs/SCHEMA.md).
 
+## Tester check: dj-check
+
+`dj-check` is a one-command check for a tester's own Mac on Fedora, Arch Linux ARM or NixOS. It needs no install:
+
+    curl -fsSL https://raw.githubusercontent.com/aurora-silicon/aurora-diag/main/dj-check.sh | sh
+
+The script downloads this repository into a temporary directory, runs `sudo aurora-diag dj-check` and removes the download. From a checkout, `sudo bin/aurora-diag dj-check` does the same.
+
+It reads only. It prints a PASS/FAIL table and writes `~/aurora-dj-check-<time>.txt` (plus `.json`) with host and user names, MAC and IP addresses and the serial number taken out.
+
+- A, speaker fix: kernel-aurora / linux-aurora at least 7.3.0-27, the protection daemon the packaged udev rules start (speakersafetyd or speakerguardd 0.1) is active with 0 restarts and no ENOMEM, panic or hw_params lines this boot, the sense PCM is open, the kernel unlocked the speakers, 0 AVCs, 0 failed units.
+- B, speaker info: board, macaudio and amp compatibles, the AID from the ADT, `/chosen/asahi,speaker-id`, the tuning bundle's manifest (no tuning data), v2 packages, `speakerguardd-gate explain`, the speaker state directories (names and sizes), the PipeWire speaker nodes with rate and quantum, 6 s of idle `pw-top`, and the speaker journals of the last 8 boots.
+- C, Touch ID: password first after a restart (`require_password_after_boot`), aurora-touchid-boot, the rearm socket, the SEP units and fprintd.
+- D, Wi-Fi, AWDL and Wake-on-LAN packages and state, for information.
+- E, `aurora-speaker-upgrade --check` when the tool is installed (collects and self-checks, never switches).
+- Last, an optional listening step: a 16 s test tone through the normal output, played only after you answer `y`. `--no-listen` skips it.
+
+Exit code 0 when everything passed, 1 otherwise.
+
 ## The dashboard
 
 `aurora-diag tui` opens a tabbed dashboard (Overview, Sensors, Clocks, Fans, GPU, ANE, vs macOS, Subsystems, Services, Coverage, Log) with status chips, live sparklines and the terminal's light or dark theme (`d` switches). The overview is one tile per category; click a tile, or Tab to it and press Enter, for its drill-down, which updates live (thermal, CPU, GPU, memory, power, audio and sensors every second, the rest every 15 seconds) without moving the scroll position. `/` filters the drill-down's rows, Esc goes back. It needs Textual (`python3-textual`, `python-textual`, `python3Packages.textual`); without it the plain curses view runs instead (`--curses` forces it).
