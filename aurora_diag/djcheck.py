@@ -133,11 +133,18 @@ class Redactor:
         return text
 
 
+NOLOGIN = ("nologin", "false", "sync", "shutdown", "halt")
+
+
 def local_names():
+    """Login names and real-name words of the people on this Mac. System and
+    systemd DynamicUser accounts (speakersafetyd, nqptp, ...) are left alone:
+    their names are unit names, not people."""
     names = []
     for p in pwd.getpwall():
-        if p.pw_uid >= 1000 and p.pw_uid < 65534:
-            names += [p.pw_name] + [g for g in re.split(r"[ ,]+", p.pw_gecos or "") if len(g) >= 3]
+        if not 1000 <= p.pw_uid < 60000 or os.path.basename(p.pw_shell or "") in NOLOGIN:
+            continue
+        names += [p.pw_name] + [g for g in re.split(r"[ ,]+", p.pw_gecos or "") if len(g) >= 3]
     return names
 
 
@@ -529,6 +536,7 @@ class Check:
             txt.append(json.dumps(sel, sort_keys=True))
         main = [n for n in nodes if "speaker" in (str(n.get("node.name")) + str(n.get("node.description"))).lower()
                 and n.get("media.class") == "Audio/Sink"]
+        self.facts["speaker_sinks"] = [n.get("node.name") for n in main]
         if main:
             n = main[0]
             self.row(g, "PipeWire speaker sink", INFO, "%s, state %s, rate %s, force-rate %s, latency %s" % (
@@ -804,6 +812,10 @@ def listening(chk, tty):
               "2. While it plays, raise the volume slowly with the keyboard keys, up to where you normally listen.\n"
               "3. Listen for buzz, crackle or clicks, especially at the start of each tone and during the sweep.\n"
               % (chk.facts.get("default_sink") or "unknown"))
+    ds = chk.facts.get("default_sink") or ""
+    if ds not in (chk.facts.get("speaker_sinks") or []) and "speaker" not in ds.lower():
+        tty.write("NOTE: the default output does not look like the built-in speakers. Pick the speakers in the sound\n"
+                  "settings first if you want to test them.\n")
     a = ask("Play the test tone now? [y/N] ", tty)
     if a.lower() not in ("y", "yes"):
         chk.row(g, "listening step", SKIP, "skipped by the user")
