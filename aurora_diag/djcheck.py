@@ -122,6 +122,7 @@ class Redactor:
     def __call__(self, text):
         if not isinstance(text, str):
             return text
+        text = re.sub(r'("unit_id"\s*:\s*")[0-9a-fA-F]{16,}', r"\1<unit>", text)
         text = re.sub(r"/home/[^/\s:]+", "/home/<user>", text)
         text = re.sub(r"/run/user/\d+", "/run/user/<uid>", text)
         for w, rep in self.words:

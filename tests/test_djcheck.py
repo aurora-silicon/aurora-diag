@@ -32,6 +32,7 @@ class Redaction(unittest.TestCase):
             self.assertNotIn(leak, t)
         self.assertIn("<host>", t)
         self.assertIn("speakersafetyd", t)
+        self.assertNotIn("017d60b8", r('{"unit_id": "017d60b8840af2880379094cf29c852015043228dbd6352584faf7a4846a26d1"}'))
 
     def test_keeps_words_that_contain_a_name(self):
         r = djcheck.Redactor(["dj"], [], [])
