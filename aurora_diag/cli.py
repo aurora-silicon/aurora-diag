@@ -695,6 +695,11 @@ def cmd_tui(args, m):
     tui.run(args, m)
 
 
+def cmd_dj_check(args, m):
+    from . import djcheck
+    return djcheck.run_check(args)
+
+
 def cmd_log_path(args, m):
     print(log.log_path())
 
@@ -835,6 +840,10 @@ def parser():
     x.add_argument("--curses", action="store_true", help="the plain curses view even when Textual is installed")
     x.add_argument("--dump", metavar="FILE", help="write a capture of everything the dashboard shows (10 s of samples) and exit")
     sub.add_parser("log-path", help="where the log goes")
+    x = sub.add_parser("dj-check", help="speaker fix, speaker info, Touch ID and radio checks with a PASS/FAIL table and a redacted report (root)")
+    x.add_argument("--no-listen", action="store_true", help="skip the optional listening step (no prompt, no sound)")
+    x.add_argument("--user", help="the desktop user whose PipeWire session to read (default: the sudo user)")
+    x.add_argument("--out", help="report path without extension (default: ~user/aurora-dj-check-<time>)")
     return p
 
 
@@ -845,6 +854,7 @@ COMMANDS = {
     "set": cmd_set, "watch": cmd_watch, "fan": cmd_fan, "fan-guard": cmd_fan_guard,
     "haptic": cmd_haptic, "display": cmd_display, "kbd": cmd_kbd, "audio": cmd_audio,
     "journal": cmd_journal, "restore": cmd_restore, "tui": cmd_tui, "log-path": cmd_log_path,
+    "dj-check": cmd_dj_check,
 }
 
 
@@ -875,6 +885,8 @@ def main(argv=None):
     if not args.cmd:
         args.cmd = "summary"
         args.cat = args.source = args.grep = None
+    if args.cmd == "dj-check" and not args.log:
+        args.log = os.devnull  # dj-check writes only its report
     # Commands that print one JSON document keep stdout for that document;
     # their events still go to the log file.
     log.setup(stdout_json=args.json and args.cmd not in DOCUMENT_COMMANDS, path=args.log)
