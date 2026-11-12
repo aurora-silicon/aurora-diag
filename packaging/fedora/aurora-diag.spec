@@ -1,6 +1,6 @@
 %global commit @COMMIT@
 Name: aurora-diag
-Version: 0.4.0
+Version: 0.5.0
 Release: 1%{?dist}
 Summary: Bring-up diagnostics for Apple silicon Macs (development only)
 License: MIT
@@ -45,6 +45,14 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_datadir}/applications/org.aurorasilicon.Diag.desktop
 
 %changelog
+* Thu Nov 12 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.5.0-1
+- status: what works on one page (kernel, fleet tag, boot chain, firmware,
+  each block reported vs working, GPU APIs, services).
+- report: host and user names, MAC/IP addresses, serial, Wi-Fi names and
+  UUIDs taken out; files named after the board, mode 0600.
+- Audio category, services tab and summary report speakerguardd v2.
+- aurora-panic-log and dj-check (since 0.4.0).
+
 * Sun Nov 01 2026 Aurora Silicon <ryan@aurorasilicon.org> - 0.4.0-1
 - Demos home: motion (spirit level, horizon, compass), speaker protection,
   AVE/AVD benches vs macOS, ANE classify, GPU, aurora-try camera, captions,

@@ -15,11 +15,12 @@ Every tile opens a live drill-down (click it, or Tab to it and press Enter). The
 
 ## Quick start
 
+    aurora-diag status                   # what works: kernel, fleet, boot chain, firmware, each block reported vs working
     aurora-diag check                    # pass/warn/fail per block and service, exit 0/1/2
     aurora-diag snapshot -o good.json    # remember a known-good boot
     aurora-diag check --expect good.json # after a kernel update: anything missing fails
     aurora-diag diff good.json new.json  # what changed between two boots
-    aurora-diag report -o .              # one JSON plus text file to attach to a bug
+    aurora-diag report -o .              # one JSON plus text file to attach to a bug (personal data removed)
     aurora-diag ane --json               # ANE status and saved benchmark, no workload launched
     aurora-diag compare --json           # live readings vs the J616s macOS baseline
     aurora-diag show cpu --json          # one category, as the dashboard's drill-down shows it
@@ -29,6 +30,21 @@ Every tile opens a live drill-down (click it, or Tab to it and press Enter). The
     aurora-panic-log                     # the last panic iBoot kept for the next OS, and kdump's Linux crash dumps (root, read only)
 
 Reading needs no privileges, though root sees more (debugfs, dmesg, speakerguardd's state, the actuator's reports). Changes need root.
+
+## What works: status
+
+`aurora-diag status` answers "what works on this Mac" on one page:
+
+- software: the distribution, the kernel release, build and package, the fleet tag (`fleetNN`) when it is a fleet kernel, the boot chain versions the loaders publish in `/chosen`, Mesa and this tool;
+- hardware: one row per block (every engine, GPU, internal panel, backlight, Wi-Fi, Bluetooth, speaker protection, ALSA, amplifiers, every sensor, NVMe, battery, power, thermal, Touch ID) with whether the kernel reports it, whether it works (bound, no kernel error, readings or devices present) and its firmware version;
+- the Vulkan driver, API and conformance version, OpenGL and GLES (`--no-api` skips them);
+- the services behind the hardware: speaker protection, fprintd, the SEP units, sensors, Bluetooth, NetworkManager, power profiles.
+
+The rows come from the same probes as `show` and the dashboard. `--json` prints one document ([docs/SCHEMA.md](docs/SCHEMA.md)); the exit code is 2 when a block is broken or a service failed, 1 when one is partial.
+
+## Bug reports
+
+`aurora-diag report` collects the machine, kernel, firmware, GPU, Mesa, Vulkan, GL, sensors, fans, bound drivers and the last kernel errors into one JSON and one text file. Before anything is printed or written it takes out the host name, login and real names, home paths, MAC and IP addresses, the serial number, Wi-Fi network names and UUIDs. Files are named after the board (`aurora-diag-report-apple-j413-<time>`) and are readable only by their owner. Read the text file before you attach it; `--no-redact` keeps everything for local use.
 
 ## Panic log
 
@@ -219,6 +235,7 @@ One module per area, each one a generic discovery over the kernel's interfaces:
 | `demos.py` | the demo list: discovery, the motion drawing, start and stop, result parsing |
 | `kms.py`, `edid.py` | read-only DRM ioctls (connectors, properties, CRTCs, the flattened tree's node order); EDID and DCP dictionary decoders |
 | `check.py`, `snapshot.py`, `report.py`, `probe.py` | the agent side: verdicts, snapshots and diffs, bug reports, per-probe deadlines |
+| `status.py`, `privacy.py` | what works on one page; taking personal data out of reports |
 | `control.py`, `fans.py`, `haptics.py`, `display.py`, `audio.py` | the write path, its policy and journal; fan guard, click strength, display, speaker protection readout |
 | `dashboard.py`, `tui_textual.py`, `tui.py` | dashboard data, the Textual UI, the curses fallback |
 | `cli.py`, `log.py` | commands and the JSON-lines log |

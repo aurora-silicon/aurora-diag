@@ -90,7 +90,8 @@ def _w(lines, k, v, ind=2):
 def text(rep):
     L = []
     m = rep["machine"]
-    L.append("aurora-diag report %s  %s  %s" % (rep["version"], rep["host"], rep["generated"]))
+    L.append("aurora-diag report %s  %s  %s%s" % (rep["version"], rep["host"], rep["generated"],
+                                                 "  (personal data removed)" if rep.get("redacted") else ""))
     L.append("")
     L.append("Machine")
     _w(L, "model", m["model"])
@@ -219,11 +220,26 @@ def text(rep):
     return "\n".join(str(x) for x in L) + "\n"
 
 
+def redact(rep, redactor=None):
+    """The report with personal data taken out (privacy.py): host and user
+    names, home paths, MAC and IP addresses, the serial number, Wi-Fi
+    network names and UUIDs. Hardware facts and readings are kept."""
+    from . import privacy
+    red = redactor or privacy.for_report()
+    out = red.tree(json.loads(json.dumps(rep, default=str)))
+    out["host"] = "<host>"
+    out["redacted"] = True
+    return out
+
+
 def write(rep, outdir):
+    """Writes the JSON and text report (mode 0600). Files are named after
+    the board, not the host, so the names carry nothing personal."""
     os.makedirs(outdir, exist_ok=True)
-    stem = os.path.join(outdir, "aurora-diag-report-%s-%s" % (rep["host"], rep["generated"].replace(":", "")))
-    with open(stem + ".json", "w") as f:
-        json.dump(rep, f, indent=1, default=str)
-    with open(stem + ".txt", "w") as f:
-        f.write(text(rep))
+    board = ((rep.get("machine") or {}).get("board") or "unknown").replace(",", "-").replace("/", "-")
+    stem = os.path.join(outdir, "aurora-diag-report-%s-%s" % (board, rep["generated"].replace(":", "")))
+    for path, body in ((stem + ".json", json.dumps(rep, indent=1, default=str)), (stem + ".txt", text(rep))):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(body)
     return stem + ".json", stem + ".txt"

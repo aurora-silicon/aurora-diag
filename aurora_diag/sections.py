@@ -690,19 +690,35 @@ def audio_section(rs=None):
             mute = out.strip()
             tables.insert(1, table("Default output (PipeWire, %s)" % u.pw_name, ("field", "value"), [["volume", out.strip()]]))
     svc = sg.get("service")
-    items = [item("speakerguardd", "ok" if svc == "active" else ("absent" if svc in (None, "unknown", "inactive") and not blocks else "warn"),
-                  "%s, armed %s, governor %s, hottest coil %s C" % (svc, sg.get("armed"), sg.get("governor"), sg.get("hottest_coil_C"))),
-             item("speaker model", "ok" if blocks else "absent",
-                  ("%d speakers modelled" % len(blocks.get("speaker", {}))) if blocks else "no /run/speakerguardd/state (needs root, or speakerguardd is not running)"),
+    v2 = byid.get("speaker.speakerguardd-v2.service")
+    v2_graph = byid.get("speaker.speakerguardd-v2.graph.result")
+    v2_amps = [v for k, v in byid.items() if k.startswith("speaker.speakerguardd-v2.session.") and k.endswith(".amps")]
+    if v2 in ("active", "failed"):
+        # speakerguardd v2 governs the speakers; the older daemons stay down beside it.
+        v2_lvl = "fail" if v2 == "failed" else ("ok" if v2_graph in (None, "pass") else "warn")
+        prot = item("speakerguardd", v2_lvl, "speakerguardd v2 %s, graph %s, amps %s" % (
+            v2, v2_graph or "unreadable (needs root)", v2_amps[0] if v2_amps else "-"))
+        svc_shown = "v2 " + v2
+    else:
+        prot = item("speakerguardd", "ok" if svc == "active" else ("absent" if svc in (None, "unknown", "inactive") and not blocks else "warn"),
+                    "speakerguardd %s, armed %s, governor %s, hottest coil %s C" % (svc, sg.get("armed"), sg.get("governor"), sg.get("hottest_coil_C")))
+        v2_lvl = None
+        svc_shown = svc
+    items = [prot,
+             item("speaker model", "ok" if blocks else ("off" if v2_lvl else "absent"),
+                  ("%d speakers modelled" % len(blocks.get("speaker", {}))) if blocks else
+                  ("speakerguardd v2 keeps its model inside the daemon" if v2_lvl else
+                   "no /run/speakerguardd/state (needs root, or speakerguardd is not running)")),
              item("amplifier temperatures", "ok" if amps else "absent", "%d amps" % len(amps) if amps else "no amplifier hwmon device"),
              item("ALSA cards", "ok" if cards else "absent", ", ".join(c[1] for c in cards) if cards else "no sound card"),
              item("default output", "ok" if mute else "absent", mute or "no desktop session with PipeWire to ask")]
-    lvl = "ok" if svc == "active" else ("warn" if blocks or svc == "failed" else "off")
+    lvl = v2_lvl or ("ok" if svc == "active" else ("warn" if blocks or svc == "failed" else "off"))
     return section("audio", "Audio & speaker protection", items, tables,
-                   headline="%s, armed %s\nhottest coil %s" % (svc or "-", sg.get("armed"), ("%.1f C" % hottest) if hottest is not None else "-"),
+                   headline=("speakerguardd v2 %s\ngraph %s" % (v2, v2_graph or "-")) if v2_lvl else
+                   "%s, armed %s\nhottest coil %s" % (svc or "-", sg.get("armed"), ("%.1f C" % hottest) if hottest is not None else "-"),
                    spark=hottest, level=lvl,
                    facts={"cards": [c[1] for c in cards], "speakers": sorted(blocks.get("speaker", {})), "amps": len(amps),
-                          "speakerguardd": svc})
+                          "speakerguardd": svc_shown})
 
 
 # -- sensors: IIO, motion, lid, buttons, jack ------------------------------------------

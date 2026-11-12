@@ -934,8 +934,13 @@ class Dash(App):
         rows.append((chip("ok" if t.get("sep_state_files") else "warn", "sep"), "SEP host state files", str(len(t.get("sep_state_files") or []))))
         rows.append((chip("ok" if t.get("pam_fprintd_in") else "off", "pam"), "pam_fprintd in", ", ".join(t.get("pam_fprintd_in") or []) or "none"))
         sg = sv.get("speakerguardd") or {}
-        rows.append((chip("ok" if sg.get("service") == "active" else "warn", "speakers"), "speakerguardd",
-                     "armed %s · governor %s · hottest coil %s °C" % (sg.get("armed"), sg.get("governor"), fmt(sg.get("hottest_coil_C")))))
+        if sg.get("v2") in ("active", "failed"):
+            v2ok = sg["v2"] == "active" and sg.get("v2_graph") in (None, "pass")
+            rows.append((chip("ok" if v2ok else ("fail" if sg["v2"] == "failed" else "warn"), "speakers"), "speakerguardd v2",
+                         "%s · graph %s · amps %s" % (sg["v2"], sg.get("v2_graph") or "-", sg.get("v2_amps") or "-")))
+        else:
+            rows.append((chip("ok" if sg.get("service") == "active" else "warn", "speakers"), "speakerguardd",
+                         "armed %s · governor %s · hottest coil %s °C" % (sg.get("armed"), sg.get("governor"), fmt(sg.get("hottest_coil_C")))))
         fill(self.query_one("#t-services", DataTable), rows)
 
     def render_log(self):

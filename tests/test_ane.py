@@ -216,7 +216,10 @@ class TestANE(AneBase):
         accelerator(self.root)
         result = check.run(Machine(), only="ane", api=False)
         self.assertTrue(result["checks"])
-        self.assertTrue(all(r["group"] == "ane" for r in result["checks"]))
+        # --only also keeps rows whose name contains the word (a host unit
+        # such as aurora-ane-*.service), so allow those beside the ane group.
+        self.assertTrue(any(r["group"] == "ane" for r in result["checks"]))
+        self.assertTrue(all(r["group"] == "ane" or "ane" in r["name"].lower() for r in result["checks"]))
         original = check.timed
 
         def timed(fn, timeout, *args):
