@@ -128,7 +128,28 @@ Exit code: 2 with regressions, 1 with other changes, 0 when nothing changed.
 
 ## report (`aurora-diag report --json`)
 
-A superset for humans and bug trackers: machine, kernel, firmware, GPU devices and readings, per-process GPU memory, Mesa ICDs and packages, the full Vulkan and GL results, compliance, clocks, the headline sensors, fans, haptics, bound platform drivers and the last kernel errors and warnings. `report -o DIR` also writes `aurora-diag-report-<host>-<time>.json` and `.txt`.
+A superset for humans and bug trackers: machine, kernel, firmware, GPU devices and readings, per-process GPU memory, Mesa ICDs and packages, the full Vulkan and GL results, compliance, clocks, the headline sensors, fans, haptics, bound platform drivers and the last kernel errors and warnings. `report -o DIR` also writes `aurora-diag-report-<board>-<time>.json` and `.txt` with mode 0600.
+
+Personal data is taken out before the report is printed or written (`privacy.py`): the host name (`host` is `"<host>"`), login and real names, home paths, MAC and IP addresses, the serial number, Wi-Fi network names (the current one and the ones NetworkManager remembers) and UUIDs such as `root=UUID=`. They become `<host>`, `<user>`, `<mac>`, `<ip>`, `<ip6>`, `<serial>`, `<ssid>` and `<uuid>`, and the document carries `"redacted": true`. `report --no-redact` keeps everything, for local use only.
+
+## status (`aurora-diag status --json`)
+
+What works on the machine, one document, schema `aurora-diag/status`, version 1:
+
+    {"schema": "aurora-diag/status", "version": 1, "generated": ..., "elapsed_s": ..., "euid": ...,
+     "machine": {"compatible", "model", "board", "soc", "apple"},
+     "software": {"distro", "os_release": {...},
+                  "kernel": {"release", "build", "package", "fleet", "tainted", "uptime_s"},
+                  "boot_chain": {"asahi,m1n1-stage2-version": ..., "u-boot,version": ..., ...},
+                  "chosen": {other /chosen firmware and version properties},
+                  "mesa": {...}, "aurora_diag": "0.5.0"},
+     "hardware": [{"category", "key", "block", "level", "state", "reported", "working", "firmware", "detail"}],
+     "apis": {"vulkan": {"instance", "devices": [{"deviceName", "driverName", "driverInfo", "apiVersion", "conformanceVersion"}]},
+              "gl_core": {"version", "renderer", ...}, "gl_compat": {...}, "gles": {...}} | null with --no-api,
+     "services": [{"unit", "level", "detail"}],
+     "counts": {"works": N, "partial": N, "broken": N, "off": N, "absent": N}}
+
+`fleet` is the `fleetNN` tag in the kernel release or its package release, null for a distro kernel. Each hardware row is one category item (the same items as `show` and `coverage`) plus a Touch ID row: `reported` means the device tree and the kernel expose the block (anything but `absent`), `working` means its level is `ok` (bound, no kernel error, readings or devices present). `state` is `works`, `partial`, `broken`, `off` or `absent`. `firmware` is the DT or kernel log version for engines, the driver's firmware for Wi-Fi and Bluetooth, and the controller firmware for NVMe. Exit code: 2 when a block is broken or a service failed, 1 when one is partial, 0 otherwise.
 
 ## readings (`list --json`, `get --json`, `watch --json`)
 

@@ -33,7 +33,7 @@ import threading
 import time
 import wave
 
-from . import __version__
+from . import __version__, privacy
 
 PASS, FAIL, WARN, INFO, SKIP = "PASS", "FAIL", "WARN", "INFO", "SKIP"
 ORDER = {FAIL: 0, WARN: 1, PASS: 2, INFO: 3, SKIP: 4}
@@ -95,58 +95,11 @@ def unit_state(unit):
     return s
 
 
-# -- redaction ----------------------------------------------------------------
+# -- redaction: shared with `report` (privacy.py) -------------------------------
 
-class Redactor:
-    """Takes out the host name, user names, home paths, MAC and IP addresses
-    and serial numbers before anything reaches the report."""
-
-    MAC = re.compile(r"\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b")
-    IPV4 = re.compile(r"\b(?!127\.0\.0\.1\b)(?:\d{1,3}\.){3}\d{1,3}\b")
-    IPV6 = re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{1,4}\b")
-
-    def __init__(self, names=(), hosts=(), secrets=()):
-        self.words = []
-        for h in hosts:
-            if h and h not in ("localhost", "fedora", "archlinux", "nixos"):
-                self.words.append((h, "<host>"))
-        for n in names:
-            if n and len(n) >= 2 and n not in ("root", "gdm", "sddm", "nobody"):
-                self.words.append((n, "<user>"))
-        for s in secrets:
-            if s and len(s) >= 6:
-                self.words.append((s, "<serial>"))
-        # longest first, so "dj-mbp" goes before "dj"
-        self.words.sort(key=lambda w: -len(w[0]))
-
-    def __call__(self, text):
-        if not isinstance(text, str):
-            return text
-        text = re.sub(r'("unit_id"\s*:\s*")[0-9a-fA-F]{16,}', r"\1<unit>", text)
-        text = re.sub(r"/home/[^/\s:]+", "/home/<user>", text)
-        text = re.sub(r"/run/user/\d+", "/run/user/<uid>", text)
-        for w, rep in self.words:
-            text = re.sub(r"(?<![\w-])%s(?![\w-])" % re.escape(w), rep, text)
-        text = re.sub(r"[\w-]+(?:\.[\w-]+)*\.local\b", "<mdns>.local", text)
-        text = self.MAC.sub("<mac>", text)
-        text = self.IPV4.sub("<ip>", text)
-        text = self.IPV6.sub("<ip6>", text)
-        return text
-
-
-NOLOGIN = ("nologin", "false", "sync", "shutdown", "halt")
-
-
-def local_names():
-    """Login names and real-name words of the people on this Mac. System and
-    systemd DynamicUser accounts (speakersafetyd, nqptp, ...) are left alone:
-    their names are unit names, not people."""
-    names = []
-    for p in pwd.getpwall():
-        if not 1000 <= p.pw_uid < 60000 or os.path.basename(p.pw_shell or "") in NOLOGIN:
-            continue
-        names += [p.pw_name] + [g for g in re.split(r"[ ,]+", p.pw_gecos or "") if len(g) >= 3]
-    return names
+Redactor = privacy.Redactor
+local_names = privacy.local_names
+NOLOGIN = privacy.NOLOGIN
 
 
 # -- distro / packages ----------------------------------------------------------

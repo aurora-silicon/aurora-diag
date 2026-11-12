@@ -106,6 +106,8 @@ def summary(readings, machine):
     if sg:
         coils = [r["value"] for r in sg if r["attr"] in ("t_coil_C", "ff_coil_C", "vi_coil_C") and isinstance(r["value"], float)]
         out["speaker_protection"] = {
+            "speakerguardd_v2": by.get("speaker.speakerguardd-v2.service", {}).get("value"),
+            "speakerguardd_v2_graph": by.get("speaker.speakerguardd-v2.graph.result", {}).get("value"),
             "speakerguardd": by.get("speaker.speakerguardd.service", {}).get("value"),
             "speakersafetyd": by.get("speaker.speakersafetyd.service", {}).get("value"),
             "armed": by.get("speaker.speakerguardd.armed", {}).get("value"),
@@ -421,6 +423,8 @@ def cmd_restore_from_log(args, m):
 def cmd_report(args, m):
     from . import report as rp
     rep = rp.build(m, summary)
+    if not args.no_redact:
+        rep = rp.redact(rep)
     paths = rp.write(rep, args.output) if args.output else None
     log.event("report", files=paths, elapsed_s=rep["elapsed_s"])
     if args.json:
@@ -429,6 +433,19 @@ def cmd_report(args, m):
         sys.stdout.write(rp.text(rep))
         if paths:
             print("written: %s %s" % paths, file=sys.stderr)
+
+
+def cmd_status(args, m):
+    """What works on this Mac: software, every block reported vs working,
+    GPU APIs and services."""
+    from . import status
+    doc = status.build(m, api=not args.no_api)
+    log.event("status", counts=doc["counts"], fleet=doc["software"]["kernel"].get("fleet"), elapsed_s=doc["elapsed_s"])
+    if args.json:
+        print(json.dumps(doc, default=str))
+    else:
+        sys.stdout.write(status.text(doc))
+    return status.exit_code(doc)
 
 
 def cmd_gpu(args, m):
@@ -847,6 +864,10 @@ def parser():
     x.add_argument("--event", action="append", help="only this event (repeatable): set refuse restored sample ...")
     x = sub.add_parser("report", help="one bug report: machine, kernel, firmware, GPU, Mesa, Vulkan, GL, sensors")
     x.add_argument("-o", "--output", help="also write the JSON and text report into this directory")
+    x.add_argument("--no-redact", action="store_true",
+                   help="keep host and user names, MAC/IP addresses, serial, Wi-Fi names and UUIDs (local use only)")
+    x = sub.add_parser("status", help="what works: kernel, fleet, boot chain, firmware, each block reported vs working, GPU APIs, services")
+    x.add_argument("--no-api", action="store_true", help="skip Vulkan and GL")
     x = sub.add_parser("gpu", help="GPU: DRM devices, driver stats, clients, Mesa, Vulkan, GL")
     x.add_argument("--no-api", action="store_true", help="skip Vulkan and GL")
     x = sub.add_parser("check", help="pass/warn/fail per subsystem, service and probe; exit 0/1/2")
@@ -910,7 +931,7 @@ def parser():
 
 COMMANDS = {
     "machine": cmd_machine, "sensors": cmd_sensors, "list": cmd_sensors, "log": cmd_log,
-    "report": cmd_report, "gpu": cmd_gpu, "ane": cmd_ane, "compare": cmd_compare, "check": cmd_check, "snapshot": cmd_snapshot,
+    "report": cmd_report, "status": cmd_status, "gpu": cmd_gpu, "ane": cmd_ane, "compare": cmd_compare, "check": cmd_check, "snapshot": cmd_snapshot,
     "diff": cmd_diff, "screenshot": cmd_screenshot, "show": cmd_show, "coverage": cmd_coverage, "demo": cmd_demo, "clocks": cmd_clocks, "subsys": cmd_subsys, "services": cmd_services, "summary": cmd_summary, "get": cmd_get,
     "set": cmd_set, "watch": cmd_watch, "fan": cmd_fan, "fan-guard": cmd_fan_guard,
     "haptic": cmd_haptic, "display": cmd_display, "kbd": cmd_kbd, "audio": cmd_audio,
@@ -920,7 +941,7 @@ COMMANDS = {
 }
 
 
-DOCUMENT_COMMANDS = ("panic-log", "check", "snapshot", "diff", "report", "gpu", "ane", "compare", "clocks", "services", "show", "coverage")
+DOCUMENT_COMMANDS = ("panic-log", "status", "check", "snapshot", "diff", "report", "gpu", "ane", "compare", "clocks", "services", "show", "coverage")
 GLOBAL_FLAGS = ("--json", "--allow-unknown", "--dry-run")
 
 
