@@ -125,12 +125,17 @@ def _firmware_by_block(subs, secs):
         for s in subs:
             if re.match(rx, s.get("block") or "") and s.get("driver"):
                 fw = subsystems.firmware_short(s)
-                if fw:
+                # an RTKit "protocol version" line is the mailbox protocol, not a firmware version
+                if fw and not re.match(r"protocol version", fw, re.I):
                     out.setdefault(key, fw)
     radio = (secs.get("radio") or {}).get("facts", {})
+    for i in (secs.get("radio") or {}).get("items", []):
+        m = re.search(r"\bfirmware ([\w.~+-]+)", str(i.get("detail")))
+        if m:
+            out[i["key"]] = m.group(1)
     for dev, d in (radio.get("wifi") or {}).items():
         if d.get("firmware"):
-            out["Wi-Fi " + dev] = d["firmware"]
+            out.setdefault("Wi-Fi " + dev, d["firmware"])
     for dev, d in (radio.get("bluetooth") or {}).items():
         if d.get("firmware"):
             out["Bluetooth " + dev] = d["firmware"]
@@ -296,7 +301,7 @@ def text(doc):
     _line(L, "distribution", sw.get("distro"))
     _line(L, "kernel", k["release"])
     _line(L, "kernel build", k["build"])
-    _line(L, "kernel package", k.get("package"))
+    _line(L, "kernel package", k.get("package") or "none (installed outside the package manager)")
     _line(L, "fleet", k.get("fleet") or "none (not a fleet kernel)")
     _line(L, "tainted", k.get("tainted"))
     for name, v in sorted((sw.get("boot_chain") or {}).items()):
