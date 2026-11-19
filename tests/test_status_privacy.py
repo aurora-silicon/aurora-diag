@@ -27,7 +27,7 @@ class Fleet(unittest.TestCase):
         self.assertEqual(status.fleet_tag("7.3.0-27.aurora.fc44.aarch64", "kernel-aurora-7.3.0-27.fleet70.fc44"), "fleet70")
 
     def test_distro_kernel_has_no_fleet(self):
-        self.assertIsNone(status.fleet_tag("7.3.0-400.asahi.fc44.aarch64", "kernel-16k-7.3.0-400.asahi.fc44"))
+        self.assertIsNone(status.fleet_tag("7.3.0-400.fc44.aarch64", "kernel-16k-7.3.0-400.fc44"))
         self.assertIsNone(status.fleet_tag("6.18.2-1-ARCH"))
 
 
@@ -117,12 +117,25 @@ class StatusAndAudio(Base):
         self.assertEqual(rows["NVMe nvme0"]["state"], "partial")
         self.assertEqual(rows["NVMe nvme0"]["firmware"], "561.100")
 
+    def test_pre_rename_boot_chain_names_are_mapped(self):
+        # LEGACY-ASAHI(2027-02-28): aura builds before the rename publish asahi, names only.
+        build(self.root)
+        w(self.root, "/proc/device-tree/chosen/asahi,m1n1-stage2-version", "v1.4.20\0")
+        w(self.root, "/proc/device-tree/chosen/asahi,system-fw-version", "27.0\0")
+        fw = Machine().firmware()
+        self.assertEqual(fw.get("aurora,aura-stage2-version"), "v1.4.20")
+        self.assertEqual(fw.get("aurora,system-fw-version"), "27.0")
+        self.assertFalse([k for k in fw if k.startswith("asahi,")])
+        # Both names published (a transitional aura): the new name wins.
+        w(self.root, "/proc/device-tree/chosen/aurora,aura-stage2-version", "v1.5.0\0")
+        self.assertEqual(Machine().firmware().get("aurora,aura-stage2-version"), "v1.5.0")
+
     def test_status_document_on_a_fake_machine(self):
         build(self.root)
-        w(self.root, "/proc/device-tree/chosen/asahi,m1n1-stage2-version", "v1.4.21\0")
+        w(self.root, "/proc/device-tree/chosen/aurora,aura-stage2-version", "v1.4.21\0")
         doc = status.build(Machine(), api=False, timeout=10)
         self.assertEqual(doc["schema"], "aurora-diag/status")
-        self.assertEqual(doc["software"]["boot_chain"].get("asahi,m1n1-stage2-version"), "v1.4.21")
+        self.assertEqual(doc["software"]["boot_chain"].get("aurora,aura-stage2-version"), "v1.4.21")
         self.assertIn("Touch ID", [r["block"] for r in doc["hardware"]])
         self.assertTrue(all(set(r) >= {"block", "reported", "working", "state", "firmware"} for r in doc["hardware"]))
         text = status.text(doc)

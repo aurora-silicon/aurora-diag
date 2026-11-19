@@ -167,7 +167,7 @@ def boot_time():
     return None
 
 
-# -- ADT (read only; the same layout m1n1 documents) ----------------------------
+# -- ADT (read only; the same layout aura documents) ----------------------------
 
 def adt_path():
     for line in (read("/proc/mtd") or "").splitlines():
@@ -357,7 +357,7 @@ class Check:
         f = out(["systemctl", "--failed", "--no-legend", "--plain"])
         failed = [line.split()[0] for line in f.splitlines() if line.strip()]
         self.row(g, "0 failed units", PASS if not failed else FAIL, "none" if not failed else " ".join(failed))
-        for p in ("speakersafetyd", "speakerguardd", "aurora-audio", "asahi-audio", "speakersafetyd-aurora-profiles",
+        for p in ("speakersafetyd", "speakerguardd", "aurora-audio", "speakersafetyd-aurora-profiles",
                   "pipewire", "wireplumber"):
             v = self.pk.version(p)
             if v:
@@ -398,7 +398,9 @@ class Check:
             self.facts["aid"] = aid
         else:
             self.row(g, "AID (ADT acoustic-id)", INFO, "unavailable: %s" % why)
-        sp = read("/proc/device-tree/chosen/asahi,speaker-id", binary=True)
+        sp = read("/proc/device-tree/chosen/aurora,speaker-id", binary=True)
+        if sp is None:  # LEGACY-ASAHI(2027-02-28): pre-rename aura
+            sp = read("/proc/device-tree/chosen/asahi,speaker-id", binary=True)
         self.row(g, "speaker-id (/chosen)", INFO, str(int.from_bytes(sp, "big")) if sp and len(sp) == 4 else "not exported by this boot chain")
         for d in ("/lib/firmware/vendor/apple/audio-tuning", "/run/aurora-firmware/vendorfw/apple/audio-tuning"):
             m = read(d + "/manifest.json")
