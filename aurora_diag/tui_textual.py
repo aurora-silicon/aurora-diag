@@ -716,8 +716,8 @@ class Dash(App):
         fw = md.get("firmware") or {}
         self.query_one("#banner", Static).update(
             "%s  ·  %s  ·  kernel %s  ·  stage2 %s  ·  system firmware %s" % (
-                md.get("model"), md.get("soc"), self.data.get("kernel") or "", fw.get("asahi,m1n1-stage2-version", "?"),
-                fw.get("asahi,system-fw-version", "?")))
+                md.get("model"), md.get("soc"), self.data.get("kernel") or "", fw.get("aurora,aura-stage2-version", "?"),
+                fw.get("aurora,system-fw-version", "?")))
         self.render_overview()
         self.render_sensors()
         self.render_clocks()

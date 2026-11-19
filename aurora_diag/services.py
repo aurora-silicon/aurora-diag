@@ -20,7 +20,9 @@ from . import audio, sysfs
 
 UNIT_RE = re.compile(r"^(aurora[-\w]*|speaker\w*|fprintd|iio-sensor-proxy|power-profiles-daemon|tuned|tuned-ppd|"
                      r"thermald|upower|bluetooth|NetworkManager|wpa_supplicant|iwd|gdm|sddm|greetd|"
-                     r"systemd-backlight@.*|alsa-state|alsa-restore|asahi[-\w]*|macsmc[-\w]*|"
+                     r"systemd-backlight@.*|alsa-state|alsa-restore|macsmc[-\w]*|"
+                     # LEGACY-ASAHI(2027-02-28): units of distribution packages from before the rename.
+                     r"asahi[-\w]*|"
                      r"pipewire|pipewire-pulse|wireplumber|shairport-sync|nqptp)\.(service|socket|timer)$")
 USER_UNITS = ("pipewire.service", "pipewire-pulse.service", "wireplumber.service")
 PROPERTIES = ("Id,ActiveState,SubState,UnitFileState,ExecMainStartTimestamp,NRestarts,Result,"
