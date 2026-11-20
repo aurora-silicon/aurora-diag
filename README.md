@@ -21,6 +21,7 @@ Every tile opens a live drill-down (click it, or Tab to it and press Enter). The
     aurora-diag check --expect good.json # after a kernel update: anything missing fails
     aurora-diag diff good.json new.json  # what changed between two boots
     aurora-diag report -o .              # one JSON plus text file to attach to a bug (personal data removed)
+    aurora-diag irq-watch --json         # short read-only error-handler interrupt-rate capture
     aurora-diag ane --json               # ANE status and saved benchmark, no workload launched
     aurora-diag compare --json           # live readings vs the J616s macOS baseline
     aurora-diag show cpu --json          # one category, as the dashboard's drill-down shows it
@@ -45,6 +46,38 @@ The rows come from the same probes as `show` and the dashboard. `--json` prints 
 ## Bug reports
 
 `aurora-diag report` collects the machine, kernel, firmware, GPU, Mesa, Vulkan, GL, sensors, fans, bound drivers and the last kernel errors into one JSON and one text file. Before anything is printed or written it takes out the host name, login and real names, home paths, MAC and IP addresses, the serial number, Wi-Fi network names and UUIDs. Files are named after the board (`aurora-diag-report-apple-j413-<time>`) and are readable only by their owner. Read the text file before you attach it; `--no-redact` keeps everything for local use.
+
+## Interrupt evidence: irq-watch
+
+`aurora-diag irq-watch` reads `/proc/interrupts` without root or system changes.
+It focuses on address-named error-handler rows, retaining Linux IRQ, controller,
+hardware IRQ, handler and CPU columns. Linux IRQ numbers can change at boot;
+none is hard-coded. No workload, suspend or driver action is triggered.
+
+    aurora-diag irq-watch                        # baseline plus three 1-second intervals
+    aurora-diag irq-watch --interval 0.5 --samples 4 --json
+
+`--samples` counts intervals after the initial baseline (1–60); `--interval`
+is 0.1–5 seconds, with a maximum requested delay product of 30 seconds. Reads
+and output are bounded. Rates use actual monotonic elapsed time. Text gives
+concise rates/reasons; `--json` prints one [document](docs/SCHEMA.md#irq-watch-aurora-diag-irq-watch---json)
+with counts, per-CPU deltas, baselines and anomalies. Absent/unreadable/malformed
+input, counter resets, identity changes and CPU hotplug produce unknown intervals
+and fresh baselines. A measured zero is distinct from missing data. Exit 1 signals
+an absent/unknown reading or continuity anomaly, not a high rate; exit 2 is invalid
+arguments. Normal invocation logging still applies (`--log FILE`).
+
+This supports investigation of [linux#2426](https://github.com/aurora-silicon/linux/issues/2426),
+which reports a J614s/T6040 post-wake ni3 source 63 storm on AIC2 hardware IRQ
+65799, handler `24f000000.error-handler`, despite zero EDAC ce/ue counts. This
+command measures IRQ deliveries; it does not read EDAC counters or NI status.
+The status-word/acknowledgement explanation is unconfirmed. J616s relevance
+comes from [linux#1040](https://github.com/aurora-silicon/linux/pull/1040), not proof
+of the same failure. A high rate does not confirm a hardware/driver defect, and a
+short quiet capture cannot exclude an intermittent problem. Attach the capture
+with a description of when it was taken; this command does not resolve the issue.
+Capture metadata is limited to kernel release and allowlisted board/SoC/platform
+compatibles; no host/user names, serials, full device tree or process/network data.
 
 ## Panic log
 
