@@ -16,7 +16,9 @@ Kinds:
 
 Programs are found, never assumed: PATH, the desktop user's
 ~/.local/bin, ~/aurora-try-dev and the bench kits under /var/tmp and
-/root. A demo whose program or device is missing says which.
+/root. A demo whose program or device is missing says which. A demo that
+runs as root (not as the desktop user) only uses programs and files that
+root owns and no other user can replace.
 """
 
 import csv
@@ -27,6 +29,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import time
 
@@ -56,19 +59,45 @@ def homes():
     return [h for i, h in enumerate(out) if h and h not in out[:i]]
 
 
-def find_bin(names, globs=()):
+def root_only(path, owners=(0,)):
+    """True when path, symlinks resolved, is owned by root and nobody else
+    can change or replace it: the file and every directory above it are
+    root's and not group or world writable, except a sticky directory such
+    as /var/tmp, where only the entry's owner can rename it."""
+    p = os.path.realpath(path)
+    try:
+        st = os.stat(p)
+        if st.st_uid not in owners or st.st_mode & 0o022:
+            return False
+        while p != os.path.dirname(p):
+            p = os.path.dirname(p)
+            st = os.stat(p)
+            if st.st_uid not in owners or (st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX):
+                return False
+    except OSError:
+        return False
+    return True
+
+
+def _usable(p, as_root):
+    """as_root: the program runs with this process's rights, not the desktop
+    user's; when that is root it must be root's alone (root_only)."""
+    return not (as_root and os.geteuid() == 0) or root_only(p)
+
+
+def find_bin(names, globs=(), as_root=False):
     for n in names:
         p = shutil.which(n)
-        if p:
+        if p and _usable(p, as_root):
             return p
     for h in homes():
         for n in names:
             p = os.path.join(h, ".local/bin", n)
-            if os.access(p, os.X_OK):
+            if os.access(p, os.X_OK) and _usable(p, as_root):
                 return p
     for g in globs:
         for p in sorted(glob.glob(g)):
-            if os.path.isfile(p) and os.access(p, os.X_OK):
+            if os.path.isfile(p) and os.access(p, os.X_OK) and _usable(p, as_root):
                 return p
     return None
 
@@ -387,7 +416,9 @@ def _need(*checks):
 
 
 def _avebench():
-    return find_bin(["avebench"], ["/var/tmp/*/avebench", "/root/*/avebench", "/root/avebench/avebench", "/root/avebench"])
+    # Not an as_user demo: it runs as whoever runs aurora-diag.
+    return find_bin(["avebench"], ["/var/tmp/*/avebench", "/root/*/avebench", "/root/avebench/avebench", "/root/avebench"],
+                    as_root=True)
 
 
 def ave_probe():
@@ -428,7 +459,9 @@ def ave_reference():
 
 
 def _avdbench():
-    return find_bin(["avd-bench"], ["/var/tmp/*/avd-bench/avd-bench", "/var/tmp/*/avd-bench", "/root/*/avd-bench"])
+    # Not an as_user demo: it runs as whoever runs aurora-diag.
+    return find_bin(["avd-bench"], ["/var/tmp/*/avd-bench/avd-bench", "/var/tmp/*/avd-bench", "/root/*/avd-bench"],
+                    as_root=True)
 
 
 def _avd_sample():
@@ -436,11 +469,11 @@ def _avd_sample():
     roots = [os.path.dirname(b), os.path.dirname(os.path.dirname(b))] if b else []
     for r in roots:
         for p in ("h264-1080.mp4", "samples/h264-1080.mp4", "media/h264-1080.mp4", "mediakit/samples/h264-1080.mp4"):
-            if os.path.isfile(os.path.join(r, p)):
+            if os.path.isfile(os.path.join(r, p)) and _usable(os.path.join(r, p), True):
                 return os.path.join(r, p)
     for g in ("/var/tmp/*/h264-1080.mp4", "/var/tmp/*/*/h264-1080.mp4", "/var/tmp/*/*/*/h264-1080.mp4",
               "/var/tmp/avd-demo/demo-h264-4k30.mp4"):
-        hit = sorted(glob.glob(g))
+        hit = [p for p in sorted(glob.glob(g)) if _usable(p, True)]
         if hit:
             return hit[0]
     return None

@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -106,6 +107,112 @@ class TestWhitePoint(Base):
         self.assertTrue(any("colour 5100 K" in ln for ln in lines))
         self.assertTrue(any("absent:" in ln for ln in lines))
 
+
+
+class TestRootPrograms(unittest.TestCase):
+    """As root, the AVE/AVD benches (not as_user demos) never take a program
+    or a clip another user can replace: /var/tmp kits, ~/.local/bin."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = os.path.join(self.tmp.name, "home")
+        self.kit = os.path.join(self.tmp.name, "vartmp", "kit")
+        os.makedirs(os.path.join(self.home, ".local", "bin"))
+        os.makedirs(self.kit)
+        for d in (self.home, self.kit):
+            for n in ("avebench", "avd-bench"):
+                self.exe(os.path.join(d, ".local/bin" if d == self.home else "", n))
+        with open(os.path.join(self.kit, "h264-1080.mp4"), "wb") as f:
+            f.write(b"clip")
+        kit = self.kit
+
+        def fake_glob(pattern):
+            # The /var/tmp globs land in this user-owned kit.
+            if pattern.startswith("/var/tmp/"):
+                hit = os.path.join(kit, os.path.basename(pattern))
+                return [hit] if os.path.exists(hit) else []
+            return []
+        self.patches = [mock.patch.object(demos.shutil, "which", return_value=None),
+                        mock.patch.object(demos.glob, "glob", side_effect=fake_glob),
+                        mock.patch.object(demos, "homes", return_value=[self.home])]
+        for x in self.patches:
+            x.start()
+
+    def tearDown(self):
+        for x in self.patches:
+            x.stop()
+        self.tmp.cleanup()
+
+    @staticmethod
+    def exe(path):
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(path, 0o755)
+
+    def as_root(self):
+        return mock.patch.object(demos.os, "geteuid", return_value=0)
+
+    def test_root_skips_user_owned_benches_and_clips(self):
+        if os.getuid() == 0:
+            self.skipTest("the kit must be owned by a normal user")
+        with self.as_root():
+            self.assertIsNone(demos._avebench())
+            self.assertIsNone(demos._avdbench())
+            self.assertIsNone(demos._avd_sample())
+            self.assertIsNone(demos.ave_command())
+            self.assertIsNone(demos.avd_command())
+
+    def test_root_skips_a_user_owned_var_tmp_kit(self):
+        if os.getuid() == 0:
+            self.skipTest("the kit must be owned by a normal user")
+        for n in ("avebench", "avd-bench"):
+            os.remove(os.path.join(self.home, ".local/bin", n))
+        with self.as_root():
+            self.assertIsNone(demos._avebench())
+            self.assertIsNone(demos._avdbench())
+            self.assertIsNone(demos._avd_sample())
+
+    def test_root_skips_the_desktop_users_local_bin(self):
+        if os.getuid() == 0:
+            self.skipTest("the home must be owned by a normal user")
+        os.remove(os.path.join(self.kit, "avebench"))
+        with self.as_root():
+            self.assertIsNone(demos._avebench())
+
+    def test_normal_user_still_finds_their_benches(self):
+        with mock.patch.object(demos.os, "geteuid", return_value=os.getuid() or 1000):
+            self.assertEqual(demos._avebench(), os.path.join(self.home, ".local/bin/avebench"))
+            self.assertEqual(demos._avd_sample(), os.path.join(self.kit, "h264-1080.mp4"))
+
+    def test_as_user_lookups_are_unchanged_as_root(self):
+        self.exe(os.path.join(self.home, ".local/bin/vkcube"))
+        with self.as_root():
+            self.assertEqual(demos.find_bin(["vkcube"]), os.path.join(self.home, ".local/bin/vkcube"))
+
+    def test_root_only(self):
+        me = (0, os.getuid())
+        f = os.path.join(self.kit, "avebench")
+        os.chmod(self.kit, 0o755)
+        self.assertTrue(demos.root_only(f, owners=me))
+        self.assertFalse(demos.root_only(f))                 # owned by this user, not root
+        os.chmod(self.kit, 0o1777)                            # sticky, like /var/tmp
+        self.assertTrue(demos.root_only(f, owners=me))
+        os.chmod(self.kit, 0o777)                             # anyone can rename the entry
+        self.assertFalse(demos.root_only(f, owners=me))
+        os.chmod(self.kit, 0o755)
+        os.chmod(f, 0o775)                                    # group writable file
+        self.assertFalse(demos.root_only(f, owners=me))
+        os.chmod(f, 0o755)
+        loose = os.path.join(self.tmp.name, "loose")
+        os.makedirs(loose)
+        os.chmod(loose, 0o777)
+        os.symlink(f, os.path.join(loose, "link"))            # the link resolves to the safe file
+        self.assertTrue(demos.root_only(os.path.join(loose, "link"), owners=me))
+        self.exe(os.path.join(loose, "target"))
+        os.symlink(os.path.join(loose, "target"), os.path.join(self.kit, "via"))
+        self.assertFalse(demos.root_only(os.path.join(self.kit, "via"), owners=me))
+        self.assertFalse(demos.root_only(os.path.join(self.kit, "missing"), owners=me))
 
 if __name__ == "__main__":
     unittest.main()
