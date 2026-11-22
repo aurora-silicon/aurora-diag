@@ -193,26 +193,83 @@ class TestRootPrograms(unittest.TestCase):
     def test_root_only(self):
         me = (0, os.getuid())
         f = os.path.join(self.kit, "avebench")
+        real = os.path.realpath(f)
         os.chmod(self.kit, 0o755)
-        self.assertTrue(demos.root_only(f, owners=me))
-        self.assertFalse(demos.root_only(f))                 # owned by this user, not root
+        self.assertEqual(demos.root_only(f, owners=me), real)
+        self.assertIsNone(demos.root_only(f))                 # owned by this user, not root
         os.chmod(self.kit, 0o1777)                            # sticky, like /var/tmp
-        self.assertTrue(demos.root_only(f, owners=me))
+        self.assertEqual(demos.root_only(f, owners=me), real)
         os.chmod(self.kit, 0o777)                             # anyone can rename the entry
-        self.assertFalse(demos.root_only(f, owners=me))
+        self.assertIsNone(demos.root_only(f, owners=me))
         os.chmod(self.kit, 0o755)
         os.chmod(f, 0o775)                                    # group writable file
-        self.assertFalse(demos.root_only(f, owners=me))
+        self.assertIsNone(demos.root_only(f, owners=me))
         os.chmod(f, 0o755)
+        self.assertIsNone(demos.root_only(os.path.join(self.kit, "missing"), owners=me))
+
+    def test_root_only_links(self):
+        me = (0, os.getuid())
+        f = os.path.join(self.kit, "avebench")
+        real = os.path.realpath(f)
+        os.chmod(self.kit, 0o755)
         loose = os.path.join(self.tmp.name, "loose")
         os.makedirs(loose)
         os.chmod(loose, 0o777)
-        os.symlink(f, os.path.join(loose, "link"))            # the link resolves to the safe file
-        self.assertTrue(demos.root_only(os.path.join(loose, "link"), owners=me))
+        # A link in a writable directory to a safe file: the link can be
+        # repointed, so it is refused although its target is fine.
+        os.symlink(f, os.path.join(loose, "link"))
+        self.assertIsNone(demos.root_only(os.path.join(loose, "link"), owners=me))
+        # The reverse: a link in a safe directory to a file in a writable one.
         self.exe(os.path.join(loose, "target"))
         os.symlink(os.path.join(loose, "target"), os.path.join(self.kit, "via"))
-        self.assertFalse(demos.root_only(os.path.join(self.kit, "via"), owners=me))
-        self.assertFalse(demos.root_only(os.path.join(self.kit, "missing"), owners=me))
+        self.assertIsNone(demos.root_only(os.path.join(self.kit, "via"), owners=me))
+        # A chain through a link in a writable directory is refused too.
+        os.symlink(os.path.join(loose, "link"), os.path.join(self.kit, "chain"))
+        self.assertIsNone(demos.root_only(os.path.join(self.kit, "chain"), owners=me))
+        # Safe link to a safe file (relative): the resolved file is returned.
+        os.symlink("avebench", os.path.join(self.kit, "safe"))
+        self.assertEqual(demos.root_only(os.path.join(self.kit, "safe"), owners=me), real)
+        os.symlink("safe", os.path.join(self.kit, "safe2"))
+        self.assertEqual(demos.root_only(os.path.join(self.kit, "safe2"), owners=me), real)
+        loop = os.path.join(self.kit, "loop")
+        os.symlink("loop", loop)
+        self.assertIsNone(demos.root_only(loop, owners=me))
+
+    def root_program(self):
+        for c in ("/usr/bin/true", "/bin/true", "/usr/bin/env"):
+            r = os.path.realpath(c)
+            if os.path.isfile(r) and demos.root_only(r):
+                return r
+        self.skipTest("no root-owned program in /usr/bin")
+
+    def test_root_skips_a_user_link_to_a_root_program(self):
+        if os.getuid() == 0:
+            self.skipTest("the links must be owned by a normal user")
+        target = self.root_program()
+        for n in ("avebench", "avd-bench"):
+            os.remove(os.path.join(self.home, ".local/bin", n))
+            os.remove(os.path.join(self.kit, n))
+        # ~/.local/bin link to a root program: the user picks what root runs.
+        os.symlink(target, os.path.join(self.home, ".local/bin", "avebench"))
+        # /var/tmp/<dir> kit link to a root program.
+        os.symlink(target, os.path.join(self.kit, "avd-bench"))
+        os.remove(os.path.join(self.kit, "h264-1080.mp4"))
+        os.symlink(target, os.path.join(self.kit, "h264-1080.mp4"))
+        with self.as_root():
+            self.assertIsNone(demos._avebench())
+            self.assertIsNone(demos._avdbench())
+            self.assertIsNone(demos._avd_sample())
+
+    def test_root_gets_the_resolved_path_it_checked(self):
+        target = self.root_program()
+        # /bin is a root-owned link to usr/bin on merged-/usr systems.
+        link = os.path.join("/bin", os.path.basename(target))
+        if not os.path.islink("/bin") or os.path.realpath(link) != target:
+            self.skipTest("no /bin -> usr/bin link here")
+        with self.as_root(), mock.patch.object(demos.shutil, "which", return_value=link), \
+                mock.patch.object(demos, "homes", return_value=[]):
+            self.assertEqual(demos.find_bin(["true"], as_root=True), target)
+        self.assertEqual(demos.root_only(link), target)
 
 if __name__ == "__main__":
     unittest.main()

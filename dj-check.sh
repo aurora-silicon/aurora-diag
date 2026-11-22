@@ -27,7 +27,7 @@ SUDO=; [ "$(id -u)" = 0 ] || SUDO=sudo
 $SUDO sh -eu -c '
 REF=$1 PY=$2
 shift 2
-T=$(mktemp -d "${TMPDIR:-/tmp}/aurora-diag.XXXXXX")
+T=$(mktemp -d /tmp/aurora-diag.XXXXXX)
 trap "rm -rf \"\$T\"" EXIT
 trap "exit 130" INT TERM
 URL="https://github.com/aurora-silicon/aurora-diag/archive/$REF.tar.gz"

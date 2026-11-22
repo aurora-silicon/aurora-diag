@@ -59,45 +59,67 @@ def homes():
     return [h for i, h in enumerate(out) if h and h not in out[:i]]
 
 
-def root_only(path, owners=(0,)):
-    """True when path, symlinks resolved, is owned by root and nobody else
-    can change or replace it: the file and every directory above it are
-    root's and not group or world writable, except a sticky directory such
-    as /var/tmp, where only the entry's owner can rename it."""
-    p = os.path.realpath(path)
-    try:
-        st = os.stat(p)
-        if st.st_uid not in owners or st.st_mode & 0o022:
+def _dir_root_only(d, owners):
+    """d (resolved) and every directory above it are owned by owners and not
+    group or world writable, except a sticky directory such as /var/tmp,
+    where only an entry's owner can rename it."""
+    d = os.path.realpath(d)
+    while True:
+        st = os.stat(d)
+        if st.st_uid not in owners or (st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX):
             return False
-        while p != os.path.dirname(p):
-            p = os.path.dirname(p)
-            st = os.stat(p)
-            if st.st_uid not in owners or (st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX):
-                return False
+        if d == os.path.dirname(d):
+            return True
+        d = os.path.dirname(d)
+
+
+def root_only(path, owners=(0,)):
+    """The resolved path when path is root's alone, else None: the path as
+    given, every symbolic link on the way to its target, and the target
+    are owned by root, sit in directories only root can change, and the
+    target is not group or world writable. Callers use the returned path,
+    so what runs or is opened is what was checked."""
+    p = os.path.abspath(path)
+    try:
+        for _ in range(40):
+            st = os.lstat(p)
+            if st.st_uid not in owners or not _dir_root_only(os.path.dirname(p), owners):
+                return None
+            if not stat.S_ISLNK(st.st_mode):
+                if st.st_mode & 0o022:
+                    return None
+                return os.path.join(os.path.realpath(os.path.dirname(p)), os.path.basename(p))
+            p = os.path.join(os.path.dirname(p), os.readlink(p))
     except OSError:
-        return False
-    return True
+        return None
+    return None
 
 
 def _usable(p, as_root):
-    """as_root: the program runs with this process's rights, not the desktop
-    user's; when that is root it must be root's alone (root_only)."""
-    return not (as_root and os.geteuid() == 0) or root_only(p)
+    """The path to use for p, or None. as_root: the program runs with this
+    process's rights, not the desktop user's; when that is root it must be
+    root's alone, and the resolved path root_only() checked is used."""
+    if as_root and os.geteuid() == 0:
+        return root_only(p)
+    return p
 
 
 def find_bin(names, globs=(), as_root=False):
     for n in names:
         p = shutil.which(n)
-        if p and _usable(p, as_root):
+        p = p and _usable(p, as_root)
+        if p:
             return p
     for h in homes():
         for n in names:
             p = os.path.join(h, ".local/bin", n)
-            if os.access(p, os.X_OK) and _usable(p, as_root):
+            p = os.access(p, os.X_OK) and _usable(p, as_root)
+            if p:
                 return p
     for g in globs:
         for p in sorted(glob.glob(g)):
-            if os.path.isfile(p) and os.access(p, os.X_OK) and _usable(p, as_root):
+            p = os.path.isfile(p) and os.access(p, os.X_OK) and _usable(p, as_root)
+            if p:
                 return p
     return None
 
@@ -469,11 +491,12 @@ def _avd_sample():
     roots = [os.path.dirname(b), os.path.dirname(os.path.dirname(b))] if b else []
     for r in roots:
         for p in ("h264-1080.mp4", "samples/h264-1080.mp4", "media/h264-1080.mp4", "mediakit/samples/h264-1080.mp4"):
-            if os.path.isfile(os.path.join(r, p)) and _usable(os.path.join(r, p), True):
-                return os.path.join(r, p)
+            hit = os.path.isfile(os.path.join(r, p)) and _usable(os.path.join(r, p), True)
+            if hit:
+                return hit
     for g in ("/var/tmp/*/h264-1080.mp4", "/var/tmp/*/*/h264-1080.mp4", "/var/tmp/*/*/*/h264-1080.mp4",
               "/var/tmp/avd-demo/demo-h264-4k30.mp4"):
-        hit = [p for p in sorted(glob.glob(g)) if _usable(p, True)]
+        hit = [u for u in (_usable(p, True) for p in sorted(glob.glob(g))) if u]
         if hit:
             return hit[0]
     return None

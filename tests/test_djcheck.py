@@ -189,7 +189,11 @@ class OneLiner(unittest.TestCase):
             self.assertIn("root=1", ln, lines)
         self.assertTrue(lines[-1].startswith("python root=1 -I "), lines)
         self.assertTrue(lines[-1].endswith("/bin/aurora-diag dj-check --no-listen"), lines)
-        # The unpacked tree is gone afterwards.
+        # Unpacked under a fixed /tmp template, not the caller's TMPDIR, and
+        # gone afterwards.
+        script = lines[-1].split()[3]
+        self.assertTrue(script.startswith("/tmp/aurora-diag."), script)
+        self.assertFalse(os.path.exists(os.path.dirname(os.path.dirname(script))))
         self.assertEqual(sorted(os.listdir(self.t)), ["bin", "log", "main.tar.gz"])
 
     def test_refuses_a_ref_that_is_not_a_name(self):
