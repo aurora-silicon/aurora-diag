@@ -248,3 +248,59 @@ read-only; device access is inspected with metadata/access checks without
 opening `/dev/accel/*`. No group changes, reset or firmware fetch is performed.
 Denied-read diagnostics name the owning group, or its numeric GID if the group
 database has no entry; the suggested reset path is guidance only and is never written.
+
+## irq-watch (`aurora-diag irq-watch --json`)
+
+One document, `schema: "aurora-diag/irq-watch"`, `version: 1`. No stream of log
+records on stdout. The command uses the normal invocation log; it adds no events.
+
+| field | meaning |
+| --- | --- |
+| tool_version, generated | tool version and UTC capture time |
+| metadata | kernel_release (or null) and allowlisted Apple board/SoC/platform compatibles; null if metadata probe failed |
+| metadata_status | ok or unknown; ok can still contain missing fields |
+| focus | address.error-handler; no boot-specific Linux IRQ filter |
+| interval_s, requested_intervals | requested delay and number of intervals after the initial baseline |
+| readings_completed, elapsed_s | actual number of reads and capture duration, excluding metadata |
+| notice | limits on interpretation; no hardware/driver verdict |
+| readings | initial reading plus at most requested_intervals subsequent readings |
+
+Each reading has `index`, `offset_s` (relative to capture start), `elapsed_s`
+(since the preceding read, null initially), `read_duration_s`, `cpus` (ordered
+CPU labels), `status`, `reason` and `rows`. Timing uses monotonic read-completion
+timestamps, including read/scheduling overhead, not the requested delay. Procfs
+counters are read sequentially, not atomically; read duration exposes that limit.
+
+Input status `ok` means a complete parse with matching rows; `absent` means a
+valid table with numeric IRQs but no matching handlers; `unknown` means no usable
+table (missing, permission_denied, unreadable, empty_input, truncated_input,
+invalid_cpu_header, malformed rows/counters/identity, duplicate IRQ, a size limit,
+or read timeout/failure). A header alone is `unknown/no_irq_rows`. Unknown tables
+are discarded in full. A missing final newline detects some truncations; a table
+cut cleanly at a row boundary cannot be distinguished from a complete procfs read.
+
+Each row captures `linux_irq`, `controller`, `hardware_irq`, optional `trigger`
+(null if not exposed), `handler`, full tokenized `identity_suffix`, ordered `cpus`
+and per-CPU `counts`. `counts` is null for a previously seen row now missing.
+`state` is `ok` only when a rate can be measured, otherwise `unknown`, with a
+`reason`. `baseline` says current counts are available to start the next interval.
+`delta_counts`, summed `delta` and `rate_per_s` are numbers only for valid adjacent
+readings; otherwise all are null. Zero is a valid measured delta/rate.
+
+Reasons for losing continuity: `initial_baseline`, `appeared` (including
+reappearance), `disappeared`, `previous_reading_unknown`, `cpu_columns_changed`,
+`identity_changed`, `counter_decreased`, `invalid_elapsed`, or the current input
+error. No estimation crosses those boundaries. A reset of any CPU counter
+invalidates the interval even if the total grew. Every valid current row becomes
+the next baseline. Disappearance rows keep the previous identity and CPU columns.
+An IRQ renumbering appears as disappearance plus appearance. Row identities are
+local to a capture, not portable across boots.
+
+Bounds: 0.1–5 seconds between reads, 1–60 intervals, delay product at most 30
+seconds; defaults 1 second and 3 intervals. Each read is limited to 1 MiB, 256 CPU
+columns, 4096 numeric IRQs and 128 focused rows. A read timeout (1 second) stops
+the capture so abandoned readers cannot accumulate. Metadata has a separate
+1 second deadline. Actual wall duration can exceed requested delay due to bounded
+read overhead and scheduling. Exit 0 means all inputs matched and all intervals
+were measurable; exit 1 means absent/unknown input or a continuity anomaly;
+argument errors exit 2. These exit codes never classify an IRQ rate as a defect.

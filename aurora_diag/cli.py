@@ -775,6 +775,15 @@ def cmd_log_path(args, m):
     print(log.log_path())
 
 
+def cmd_irq_watch(args, m):
+    from . import interrupts
+    doc = interrupts.capture(args.interval, args.samples)
+    print(json.dumps(doc, allow_nan=False) if args.json else interrupts.render(doc))
+    return 1 if any(s["status"] != "ok" or any(r["state"] != "ok"
+                   and r["reason"] != "initial_baseline" for r in s["rows"])
+                   for s in doc["readings"]) else 0
+
+
 def parser():
     p = argparse.ArgumentParser(prog="aurora-diag", description=__doc__.splitlines()[0])
     p.add_argument("--version", action="version", version="aurora-diag " + __version__)
@@ -922,6 +931,9 @@ def parser():
     x.add_argument("--raw", action="store_true", help="with --save, also the whole namespace image (holds machine identifiers)")
     x.add_argument("--kdump-dir", metavar="DIR", help="list kdump crash directories here instead of the path in /etc/kdump.conf")
     sub.add_parser("log-path", help="where the log goes")
+    x = sub.add_parser("irq-watch", help="bounded read-only error-handler IRQ rates; no defect verdict")
+    x.add_argument("--interval", type=float, default=1.0, help="seconds between reads (0.1..5, default 1)")
+    x.add_argument("--samples", type=int, default=3, help="intervals after baseline (1..60, total at most 30s)")
     x = sub.add_parser("dj-check", help="speaker fix, speaker info, Touch ID and radio checks with a PASS/FAIL table and a redacted report (root)")
     x.add_argument("--no-listen", action="store_true", help="skip the optional listening step (no prompt, no sound)")
     x.add_argument("--user", help="the desktop user whose PipeWire session to read (default: the sudo user)")
@@ -938,10 +950,11 @@ COMMANDS = {
     "journal": cmd_journal, "restore": cmd_restore, "tui": cmd_tui, "log-path": cmd_log_path,
     "panic-log": cmd_panic_log,
     "dj-check": cmd_dj_check,
+    "irq-watch": cmd_irq_watch,
 }
 
 
-DOCUMENT_COMMANDS = ("panic-log", "status", "check", "snapshot", "diff", "report", "gpu", "ane", "compare", "clocks", "services", "show", "coverage")
+DOCUMENT_COMMANDS = ("panic-log", "status", "check", "snapshot", "diff", "report", "gpu", "ane", "compare", "clocks", "services", "show", "coverage", "irq-watch")
 GLOBAL_FLAGS = ("--json", "--allow-unknown", "--dry-run")
 
 
@@ -964,7 +977,14 @@ def hoist_globals(argv):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    args = parser().parse_args(hoist_globals(argv))
+    p = parser()
+    args = p.parse_args(hoist_globals(argv))
+    if args.cmd == "irq-watch":
+        from .interrupts import validate
+        try:
+            validate(args.interval, args.samples)
+        except ValueError as e:
+            p.error(str(e))
     if not args.cmd:
         args.cmd = "summary"
         args.cat = args.source = args.grep = None
