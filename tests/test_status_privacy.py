@@ -117,6 +117,24 @@ class StatusAndAudio(Base):
         self.assertEqual(rows["NVMe nvme0"]["state"], "partial")
         self.assertEqual(rows["NVMe nvme0"]["firmware"], "561.100")
 
+    def test_radio_firmware_not_reported_is_none(self):
+        secs = {
+            "radio": sections.section(
+                "radio",
+                "Radio",
+                [
+                    sections.item("Wi-Fi wld0", "ok", "apple_centauri, firmware not reported, mynet, 2.4 GHz -30 dBm"),
+                    sections.item("Wi-Fi wlan1", "ok", "brcmfmac, firmware 7.112.300.14, mynet"),
+                    sections.item("Wi-Fi wlan2", "ok", "apple_centauri, firmware unknown, not connected"),
+                ],
+                facts={"wifi": {"wld0": {"firmware": None}, "wlan1": {"firmware": "7.112.300.14"}, "wlan2": {"firmware": None}}},
+            ),
+        }
+        rows = {r["key"]: r for r in status.hardware(secs, [])}
+        self.assertIsNone(rows["Wi-Fi wld0"]["firmware"])
+        self.assertEqual(rows["Wi-Fi wlan1"]["firmware"], "7.112.300.14")
+        self.assertIsNone(rows["Wi-Fi wlan2"]["firmware"])
+
     def test_status_document_on_a_fake_machine(self):
         build(self.root)
         w(self.root, "/proc/device-tree/chosen/asahi,m1n1-stage2-version", "v1.4.21\0")
