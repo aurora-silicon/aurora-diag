@@ -63,33 +63,41 @@ def _dir_root_only(d, owners):
     """d (resolved) and every directory above it are owned by owners and not
     group or world writable, except a sticky directory such as /var/tmp,
     where only an entry's owner can rename it."""
-    d = os.path.realpath(d)
-    while True:
-        st = os.stat(d)
-        if st.st_uid not in owners or (st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX):
+    directories = [d]
+    while directories[-1] != os.path.dirname(directories[-1]):
+        directories.append(os.path.dirname(directories[-1]))
+    # Validate from the root down. In a sticky directory, the next
+    # component must still be owned by a trusted user.
+    for directory in reversed(directories):
+        st = os.lstat(directory)
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid not in owners:
             return False
-        if d == os.path.dirname(d):
-            return True
-        d = os.path.dirname(d)
+        if st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX:
+            return False
+    return True
 
 
 def root_only(path, owners=(0,)):
-    """The resolved path when path is root's alone, else None: the path as
-    given, every symbolic link on the way to its target, and the target
-    are owned by root, sit in directories only root can change, and the
-    target is not group or world writable. Callers use the returned path,
-    so what runs or is opened is what was checked."""
+    """Resolve each parent once, then validate its directory chain.
+
+    Final-component links and the target must have trusted owners.
+    Callers use the same resolved path that passed validation.
+    """
     p = os.path.abspath(path)
     try:
         for _ in range(40):
-            st = os.lstat(p)
-            if st.st_uid not in owners or not _dir_root_only(os.path.dirname(p), owners):
+            directory = os.path.realpath(os.path.dirname(p))
+            if not _dir_root_only(directory, owners):
+                return None
+            candidate = os.path.join(directory, os.path.basename(p))
+            st = os.lstat(candidate)
+            if st.st_uid not in owners:
                 return None
             if not stat.S_ISLNK(st.st_mode):
                 if st.st_mode & 0o022:
                     return None
-                return os.path.join(os.path.realpath(os.path.dirname(p)), os.path.basename(p))
-            p = os.path.join(os.path.dirname(p), os.readlink(p))
+                return candidate
+            p = os.path.join(directory, os.readlink(candidate))
     except OSError:
         return None
     return None

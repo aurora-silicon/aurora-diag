@@ -207,6 +207,15 @@ class TestRootPrograms(unittest.TestCase):
         os.chmod(f, 0o755)
         self.assertIsNone(demos.root_only(os.path.join(self.kit, "missing"), owners=me))
 
+    def test_root_only_uses_one_resolved_parent(self):
+        alias = os.path.join(self.tmp.name, "kit-link")
+        os.symlink(self.kit, alias)
+        expected = os.path.realpath(os.path.join(self.kit, "avebench"))
+        with mock.patch.object(demos.os.path, "realpath", wraps=os.path.realpath) as resolve:
+            result = demos.root_only(os.path.join(alias, "avebench"), owners=(0, os.getuid()))
+        self.assertEqual(result, expected)
+        resolve.assert_called_once_with(alias)
+
     def test_root_only_links(self):
         me = (0, os.getuid())
         f = os.path.join(self.kit, "avebench")
