@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -95,16 +96,41 @@ class TestWhitePoint(Base):
         self.assertTrue(r == 1.0 and b < g < 1.0)
 
     def test_probe_degrades(self):
-        lvl, why = demos.whitepoint_probe()
-        self.assertEqual(lvl, "absent")
-        w(self.root, "/sys/bus/iio/devices/iio:device0/in_cct_input", "5100.5\n")
-        lvl, why = demos.whitepoint_probe()
-        self.assertEqual(lvl, "ok")
-        self.assertIn("5100", why)
-        s = demos.whitepoint_sample()
-        lines = demos.whitepoint_plain(demos.whitepoint_art(s, demos.WhitePointState()))
-        self.assertTrue(any("colour 5100 K" in ln for ln in lines))
-        self.assertTrue(any("absent:" in ln for ln in lines))
+        with mock.patch.object(demos, "_getall", return_value=(None, "no bus in test")), \
+             mock.patch.object(demos, "whitepoint_setting", return_value=None):
+            lvl, why = demos.whitepoint_probe()
+            self.assertEqual(lvl, "absent")
+            w(self.root, "/sys/bus/iio/devices/iio:device0/in_cct_input", "5100.5\n")
+            lvl, why = demos.whitepoint_probe()
+            self.assertEqual(lvl, "ok")
+            self.assertIn("5100", why)
+            s = demos.whitepoint_sample()
+            lines = demos.whitepoint_plain(demos.whitepoint_art(s, demos.WhitePointState()))
+            self.assertTrue(any("colour 5100 K" in ln for ln in lines))
+            self.assertTrue(any("absent:" in ln for ln in lines))
+
+    def test_probe_with_desktop_daemons(self):
+        def fake_getall(bus, dest, path, iface, user=None):
+            if dest == demos.PROXY[0]:
+                return ({"HasAmbientLight": True, "LightLevel": 120.0, "ColorTemperature": 5400.0}, None)
+            if dest == demos.GSD[0]:
+                return ({"Temperature": 6000, "NightLightActive": False,
+                         "AmbientWhitePointAvailable": True, "AmbientWhitePointActive": True,
+                         "AmbientColorTemperature": 5400, "AmbientWhitePointTemperature": 6000}, None)
+            return (None, "not on bus")
+
+        with mock.patch.object(demos, "_getall", side_effect=fake_getall), \
+             mock.patch.object(demos, "desktop_user", return_value=mock.Mock(pw_name="test")), \
+             mock.patch.object(demos, "whitepoint_setting", return_value=True):
+            lvl, why = demos.whitepoint_probe()
+            self.assertEqual(lvl, "ok")
+            self.assertIn("5400", why)
+            self.assertIn("GNOME white point on", why)
+            s = demos.whitepoint_sample()
+            self.assertEqual(s["absent"], [])
+            lines = demos.whitepoint_plain(demos.whitepoint_art(s, demos.WhitePointState()))
+            self.assertTrue(any("colour 5400 K" in ln for ln in lines))
+            self.assertFalse(any("absent:" in ln for ln in lines))
 
 
 if __name__ == "__main__":
