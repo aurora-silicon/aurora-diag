@@ -130,7 +130,7 @@ def _firmware_by_block(subs, secs):
                     out.setdefault(key, fw)
     radio = (secs.get("radio") or {}).get("facts", {})
     for i in (secs.get("radio") or {}).get("items", []):
-        m = re.search(r"\bfirmware ([\w.~+-]+)", str(i.get("detail")))
+        m = re.search(r"\bfirmware (?!not\s+reported\b|unknown\b|none\b)([\w.~+-]+)", str(i.get("detail")), re.I)
         if m:
             out[i["key"]] = m.group(1)
     for dev, d in (radio.get("wifi") or {}).items():

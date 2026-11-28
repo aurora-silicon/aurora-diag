@@ -1302,10 +1302,10 @@ def radio():
             rows.append(["scan results", "needs root (iw scan dump)"])
         tables.append(table("Wi-Fi %s" % n, ("field", "value"), rows))
         fwlog = _fw_from_dmesg(drv)
-        fwv = (re.search(r"version (\S+)", fwlog or "") or [None, None])[1] or ei.get("firmware") or "not reported"
-        items.append(item("Wi-Fi " + n, "ok", "%s, firmware %s, %s%s" % (drv, fwv, ssid or "not connected",
+        fwv = (re.search(r"version (\S+)", fwlog or "") or [None, None])[1] or ei.get("firmware") or None
+        items.append(item("Wi-Fi " + n, "ok", "%s, firmware %s, %s%s" % (drv, fwv or "not reported", ssid or "not connected",
                                                                      (", %s %s" % (_band(freq), lk.get("signal", ""))) if ssid else "")))
-        facts["wifi"][n] = {"driver": drv, "firmware": ei.get("firmware"), "phy": bool(phy)}
+        facts["wifi"][n] = {"driver": drv, "firmware": fwv, "phy": bool(phy)}
         if ssid:
             head.append("%s %s" % (ssid[:16], lk.get("signal", "")))
     if not wl:
