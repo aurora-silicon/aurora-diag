@@ -833,6 +833,30 @@ def verdict(rows):
     return PASS
 
 
+def write_report(base, files, uid=None):
+    """Write files ({ext: text}) as <base>.<ext>, each a new file (O_EXCL,
+    no symlink followed) of mode 0600, owned by uid when given. When a name
+    is taken, <base>-2, <base>-3, ... is used instead. Returns the base used."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    for n in range(1, 100):
+        b = base if n == 1 else "%s-%d" % (base, n)
+        made = []
+        try:
+            for ext, data in files.items():
+                p = "%s.%s" % (b, ext)
+                fd = os.open(p, flags, 0o600)
+                made.append(p)
+                with os.fdopen(fd, "w") as f:
+                    if uid is not None:
+                        os.fchown(f.fileno(), uid, -1)
+                    f.write(data)
+            return b
+        except FileExistsError:
+            for p in made:
+                os.unlink(p)
+    raise FileExistsError("no free report name next to %s" % base)
+
+
 def run_check(args):
     if os.geteuid() != 0:
         print("dj-check needs root for the kernel log, the ADT and the audit log: run it with sudo", file=sys.stderr)
@@ -881,14 +905,11 @@ def run_check(args):
     base = args.out or (os.path.join(user["home"], "aurora-dj-check-%s" % time.strftime("%Y%m%d-%H%M%S")) if user else
                         "/var/tmp/aurora-dj-check-%s" % time.strftime("%Y%m%d-%H%M%S"))
     rep = full + "\n\n" + "".join("\n===== %s =====\n%s" % (t, b) for t, b in chk.sections)
-    for ext, data in (("txt", rep), ("json", json.dumps({"version": __version__, "result": v, "distro": pretty,
-                                                           "kernel": platform.release(), "board": chk.facts.get("board"),
-                                                           "rows": rows}, indent=1))):
-        p = "%s.%s" % (base, ext)
-        with open(p, "w") as f:
-            f.write(data)
-        if user and p.startswith(user["home"] + "/"):
-            os.chown(p, user["uid"], -1)
+    base = write_report(base, {"txt": rep, "json": json.dumps({"version": __version__, "result": v, "distro": pretty,
+                                                               "kernel": platform.release(),
+                                                               "board": chk.facts.get("board"), "rows": rows},
+                                                              indent=1)},
+                        user["uid"] if user and base.startswith(user["home"] + "/") else None)
     print("\nRESULT: %s" % v)
     print("Report: %s.txt (send this file; it has no user or host names, MAC or IP addresses)" % base)
     return 0 if v == PASS else 1

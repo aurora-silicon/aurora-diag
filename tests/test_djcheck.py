@@ -1,8 +1,13 @@
 # SPDX-License-Identifier: MIT
 """dj-check helpers: redaction, pw-top parsing, the ADT reader, the verdict."""
 
+import io
 import os
+import shutil
+import stat
 import struct
+import subprocess
+import tarfile
 import sys
 import tempfile
 import unittest
@@ -89,6 +94,112 @@ class Tone(unittest.TestCase):
             peak = max(abs(v) for v in struct.unpack("<%dh" % (len(data) // 2), data))
             self.assertLessEqual(peak, int(32767 * 0.25) + 1)
 
+
+class Report(unittest.TestCase):
+    """The report is created by root, maybe in the tester's home."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = os.path.join(self.tmp.name, "aurora-dj-check-20261123-120000")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_new_files_mode_0600(self):
+        b = djcheck.write_report(self.base, {"txt": "report", "json": "{}"}, uid=os.getuid())
+        self.assertEqual(b, self.base)
+        for ext, data in (("txt", "report"), ("json", "{}")):
+            p = "%s.%s" % (b, ext)
+            st = os.lstat(p)
+            self.assertTrue(stat.S_ISREG(st.st_mode))
+            self.assertEqual(stat.S_IMODE(st.st_mode), 0o600)
+            self.assertEqual(st.st_uid, os.getuid())
+            with open(p) as f:
+                self.assertEqual(f.read(), data)
+
+    def test_a_planted_symlink_or_file_is_left_alone(self):
+        target = os.path.join(self.tmp.name, "target")
+        with open(target, "w") as f:
+            f.write("keep")
+        os.symlink(target, self.base + ".txt")
+        with open(self.base + "-2.json", "w") as f:
+            f.write("keep")
+        b = djcheck.write_report(self.base, {"txt": "report", "json": "{}"})
+        self.assertEqual(b, self.base + "-3")
+        with open(target) as f:
+            self.assertEqual(f.read(), "keep")
+        with open(self.base + "-2.json") as f:
+            self.assertEqual(f.read(), "keep")
+        self.assertTrue(os.path.islink(self.base + ".txt"))
+        self.assertFalse(os.path.exists(self.base + ".json"))
+        self.assertFalse(os.path.exists(self.base + "-2.txt"))
+        self.assertEqual(stat.S_IMODE(os.lstat(b + ".txt").st_mode), 0o600)
+
+
+class OneLiner(unittest.TestCase):
+    """dj-check.sh downloads and unpacks only after sudo, as root."""
+
+    def setUp(self):
+        self.sh, tar = shutil.which("sh"), shutil.which("tar")
+        if not (self.sh and tar):
+            self.skipTest("needs sh and tar")
+        self.tmp = tempfile.TemporaryDirectory()
+        t = self.t = self.tmp.name
+        bindir, self.log = os.path.join(t, "bin"), os.path.join(t, "log")
+        os.makedirs(bindir)
+        tgz = os.path.join(t, "main.tar.gz")
+        with tarfile.open(tgz, "w:gz") as tf:
+            data = b"#!/bin/sh\n"
+            ti = tarfile.TarInfo("aurora-diag-main/bin/aurora-diag")
+            ti.size, ti.mode = len(data), 0o755
+            tf.addfile(ti, io.BytesIO(data))
+        # Stubs: sudo marks what runs under it; nothing reaches the network.
+        stubs = {
+            "id": 'echo 1000',
+            "sudo": 'FAKE_ROOT=1 exec "$@"',
+            "curl": 'echo "curl root=${FAKE_ROOT:-0}" >> "$LOG"; cat "$TGZ"',
+            "wget": 'echo "wget root=${FAKE_ROOT:-0}" >> "$LOG"; cat "$TGZ"',
+            "tar": 'echo "tar root=${FAKE_ROOT:-0}" >> "$LOG"; exec %s "$@"' % tar,
+            "python3": 'echo "python root=${FAKE_ROOT:-0} $*" >> "$LOG"; test -f "$2"',
+        }
+        for name, body in stubs.items():
+            with open(os.path.join(bindir, name), "w") as f:
+                f.write("#!%s\n%s\n" % (self.sh, body))
+            os.chmod(os.path.join(bindir, name), 0o755)
+        open(self.log, "w").close()
+        self.env = {"PATH": bindir + ":/usr/bin:/bin", "LOG": self.log, "TGZ": tgz, "TMPDIR": t}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_script(self, *args, **env):
+        return subprocess.run([self.sh, os.path.join(os.path.dirname(HERE), "dj-check.sh")] + list(args),
+                              env=dict(self.env, **env), capture_output=True, text=True, timeout=60)
+
+    def ran(self):
+        with open(self.log) as f:
+            return f.read().splitlines()
+
+    def test_download_and_unpack_run_as_root(self):
+        r = self.run_script("--no-listen")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = self.ran()
+        self.assertTrue(lines, "nothing ran")
+        for ln in lines:
+            self.assertIn("root=1", ln, lines)
+        self.assertTrue(lines[-1].startswith("python root=1 -I "), lines)
+        self.assertTrue(lines[-1].endswith("/bin/aurora-diag dj-check --no-listen"), lines)
+        # Unpacked under a fixed /tmp template, not the caller's TMPDIR, and
+        # gone afterwards.
+        script = lines[-1].split()[3]
+        self.assertTrue(script.startswith("/tmp/aurora-diag."), script)
+        self.assertFalse(os.path.exists(os.path.dirname(os.path.dirname(script))))
+        self.assertEqual(sorted(os.listdir(self.t)), ["bin", "log", "main.tar.gz"])
+
+    def test_refuses_a_ref_that_is_not_a_name(self):
+        r = self.run_script(AURORA_DIAG_REF="../x")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(self.ran(), [])
 
 if __name__ == "__main__":
     unittest.main()
