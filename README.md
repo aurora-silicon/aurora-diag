@@ -180,7 +180,7 @@ The script downloads this repository into a temporary directory, runs `sudo auro
 It reads only. It prints a PASS/FAIL table and writes `~/aurora-dj-check-<time>.txt` (plus `.json`) with host and user names, MAC and IP addresses and the serial number taken out.
 
 - A, speaker fix: kernel-aurora / linux-aurora at least 7.3.0-27, the protection daemon the packaged udev rules start (speakersafetyd or speakerguardd 0.1) is active with 0 restarts and no ENOMEM, panic or hw_params lines this boot, the sense PCM is open, the kernel unlocked the speakers, 0 AVCs, 0 failed units.
-- B, speaker info: board, macaudio and amp compatibles, the AID from the ADT, `/chosen/asahi,speaker-id`, the tuning bundle's manifest (no tuning data), v2 packages, `speakerguardd-gate explain`, the speaker state directories (names and sizes), the PipeWire speaker nodes with rate and quantum, 6 s of idle `pw-top`, and the speaker journals of the last 8 boots.
+- B, speaker info: board, macaudio and amp compatibles, the AID from the ADT, `/chosen/aurora,speaker-id`, the tuning bundle's manifest (no tuning data), v2 packages, `speakerguardd-gate explain`, the speaker state directories (names and sizes), the PipeWire speaker nodes with rate and quantum, 6 s of idle `pw-top`, and the speaker journals of the last 8 boots.
 - C, Touch ID: password first after a restart (`require_password_after_boot`), aurora-touchid-boot, the rearm socket, the SEP units and fprintd.
 - D, Wi-Fi, AWDL and Wake-on-LAN packages and state, for information.
 - E, `aurora-speaker-upgrade --check` when the tool is installed (collects and self-checks, never switches).

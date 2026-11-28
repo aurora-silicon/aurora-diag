@@ -29,7 +29,7 @@ Every document an agent parses carries `schema` and `version`. A reader should c
       "generated", "host",
       "machine": {"model", "compatible": [...]},
       "kernel": {"release", "version", "cmdline"},
-      "firmware": {"asahi,system-fw-version": "27.0", "u-boot,version": ..., ...},
+      "firmware": {"aurora,system-fw-version": "27.0", "u-boot,version": ..., ...},
       "ane": {"<platform device>": {"driver", "generation", "firmware_version", "compatible": [...]}},
       "subsystems": {"<DT path>": {"title", "kind": "block" | "infra", "driver", "level": "ok" | "warn" | "fail" | "off",
                                    "why", "dt_status", "dt_firmware", "class_devices": [...]}},
@@ -140,7 +140,7 @@ What works on the machine, one document, schema `aurora-diag/status`, version 1:
      "machine": {"compatible", "model", "board", "soc", "apple"},
      "software": {"distro", "os_release": {...},
                   "kernel": {"release", "build", "package", "fleet", "tainted", "uptime_s"},
-                  "boot_chain": {"asahi,m1n1-stage2-version": ..., "u-boot,version": ..., ...},
+                  "boot_chain": {"aurora,aura-stage2-version": ..., "u-boot,version": ..., ...},
                   "chosen": {other /chosen firmware and version properties},
                   "mesa": {...}, "aurora_diag": "0.5.0"},
      "hardware": [{"category", "key", "block", "level", "state", "reported", "working", "firmware", "detail"}],
@@ -150,6 +150,18 @@ What works on the machine, one document, schema `aurora-diag/status`, version 1:
      "counts": {"works": N, "partial": N, "broken": N, "off": N, "absent": N}}
 
 `fleet` is the `fleetNN` tag in the kernel release or its package release, null for a distro kernel. Each hardware row is one category item (the same items as `show` and `coverage`) plus a Touch ID row: `reported` means the device tree and the kernel expose the block (anything but `absent`), `working` means its level is `ok` (bound, no kernel error, readings or devices present). `state` is `works`, `partial`, `broken`, `off` or `absent`. `firmware` is the DT or kernel log version for engines, the driver's firmware for Wi-Fi and Bluetooth, and the controller firmware for NVMe. Exit code: 2 when a block is broken or a service failed, 1 when one is partial, 0 otherwise.
+
+## dj-check speaker-ID compatibility
+
+The `dj-check` report's `rows` include an informational `speaker-id (/chosen)`
+row in group `B speaker info`. Its string `detail` is the unsigned big-endian
+integer from a four-byte `aurora,speaker-id`, including valid zero. It reads
+`asahi,speaker-id` only if the new property's read returns `None` (missing or
+unreadable). A present empty or non-four-byte new value keeps precedence over
+the old value; an invalid or unavailable selected value gives
+`not exported by this boot chain`. This diagnostic row is separate from the
+snapshot/status firmware and boot-chain keys above; it adds no firmware field
+or schema version.
 
 ## readings (`list --json`, `get --json`, `watch --json`)
 

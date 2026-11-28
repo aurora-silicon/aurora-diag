@@ -14,7 +14,19 @@ from . import sysfs
 
 CHOSEN = "/proc/device-tree/chosen"
 # Boot chain and firmware versions the loaders publish in /chosen.
-CHOSEN_VERSIONS = re.compile(r"^(asahi,.*version|u-boot,version|aurora,.*version)$")
+CHOSEN_VERSIONS = re.compile(r"^(aurora,.*version|u-boot,version|asahi,.*version)$")
+# LEGACY-ASAHI(2027-02-28): aura builds before the rename publish only the asahi, names
+# (e.g. asahi,m1n1-stage2-version). They are reported under the new name
+# (aurora,aura-stage2-version); a property published under the new name wins.
+LEGACY_CHOSEN_PREFIX = "asahi,"
+
+
+def chosen_name(prop):
+    """The current name of a /chosen property (pre-rename names mapped to aurora,)."""
+    if prop.startswith(LEGACY_CHOSEN_PREFIX):
+        return "aurora," + prop[len(LEGACY_CHOSEN_PREFIX):].replace("m1n1", "aura")
+    return prop
+
 
 
 class Machine:
@@ -34,9 +46,10 @@ class Machine:
 
     def firmware(self):
         out = {}
-        for p in sysfs.listdir(CHOSEN):
-            if CHOSEN_VERSIONS.match(p):
-                out[p] = sysfs.dt_value(CHOSEN + "/" + p)
+        props = [p for p in sysfs.listdir(CHOSEN) if CHOSEN_VERSIONS.match(p)]
+        # Native names last, so they replace a mapped legacy name.
+        for p in sorted(props, key=lambda p: p.startswith(LEGACY_CHOSEN_PREFIX), reverse=True):
+            out[chosen_name(p)] = sysfs.dt_value(CHOSEN + "/" + p)
         return out
 
     def as_dict(self):

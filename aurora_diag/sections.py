@@ -653,7 +653,6 @@ def audio_section(rs=None):
                     hottest = max(hottest or -1e9, r["value"])
             rows.append(row)
         title = {"speaker": "Speakers (speakerguardd model: coil and magnet temperature, power, measured V)",
-                 "asahi": "Reference model (asahi): temperatures, holds, gain",
                  "shadow": "Shadow governor"}.get(blk, blk)
         tables.append(table(title, ["speaker"] + fields, rows))
     amps = []
@@ -851,7 +850,7 @@ def motion():
             if st not in ("okay", "ok"):
                 why = "DT node /%s is %s" % (n, st)
             elif not cal:
-                why = "DT node /%s has no calibration properties (the m1n1 stage 2 that loaded this tree did not copy them from the ADT)" % n
+                why = "DT node /%s has no calibration properties (the aura stage 2 that loaded this tree did not copy them from the ADT)" % n
             elif not dev:
                 why = "DT node /%s has no Linux device%s" % (n, "" if drivers else "; this kernel has no driver for %s" % " / ".join(comp))
             elif not sysfs.basename_of_link(dev + "/driver"):
