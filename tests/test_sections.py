@@ -192,6 +192,16 @@ class TestSections(Base):
         self.assertIn("74", notch["detail"])
         self.assertEqual(s["facts"]["connectors"]["eDP-1"]["edid_name"], "Apple Panel")
 
+    def test_backlight_with_disconnected_panel(self):
+        path = "/sys/class/drm/card1-eDP-1/status"
+        for status, level in (("disconnected", "off"), ("connected", "ok"), ("unknown", "ok")):
+            with self.subTest(status=status):
+                w(self.root, path, status + "\n")
+                display = sections.display()
+                backlight = next(i for i in display["items"] if i["key"] == "backlight")
+                self.assertEqual(backlight["level"], level)
+                self.assertIn("apple-panel-bl", display["facts"]["backlight"])
+
     def test_every_category_renders(self):
         secs = sections.collect([n for n in sections.ORDER if n != "health"], timeout=30)
         for n, s in secs.items():

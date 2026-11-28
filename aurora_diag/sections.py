@@ -1016,6 +1016,7 @@ def display():
                 cards.append((c, drv, conns))
     items, tables, facts = [], [], {"connectors": {}, "dcps": {}}
     summary_rows = []
+    panel_statuses = []
     head = None
     for card, drv, conns in cards:
         conns = sorted(conns, key=lambda c: (0 if "-eDP" in c else 1, c))
@@ -1137,6 +1138,7 @@ def display():
             facts["connectors"][short] = {"props": sorted(props), "internal": short.startswith("eDP"),
                                           "dcp": dcp["node"] if dcp and short.startswith("eDP") else None}
             if short.startswith("eDP"):
+                panel_statuses.append(status)
                 facts["connectors"][short].update({"edid_name": name, "vrr_capable": vcap, "promotion": promotion,
                                                    "max_refresh": max_rate or None, "hdr": hdr_ok})
                 if status == "connected":
@@ -1174,7 +1176,12 @@ def display():
                    os.path.basename(sysfs.realpath(d + "/device")) if sysfs.exists(d + "/device") else parent])
     if bl:
         tables.append(table("Backlight", ("device", "brightness", "actual", "bl_power", "type", "parent"), bl))
-        items.append(item("backlight", "ok", ", ".join("%s %s" % (b[0], b[1]) for b in bl)))
+        detail = ", ".join("%s %s" % (b[0], b[1]) for b in bl)
+        panels_disconnected = panel_statuses and all(status == "disconnected" for status in panel_statuses)
+        if panels_disconnected:
+            items.append(item("backlight", "off", "internal panel disconnected; " + detail))
+        else:
+            items.append(item("backlight", "ok", detail))
         facts["backlight"] = {b[0]: b[1].split("/")[1].split()[0] for b in bl}
     else:
         items.append(item("backlight", "absent", "no backlight class device"))
